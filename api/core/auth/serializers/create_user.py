@@ -5,6 +5,7 @@ from rest_framework import serializers
 
 from core.user.models import User
 from core.user.serializers import UserSerializer
+from core.permissions import can_create_user_with_role
 
 
 class CreateUserSerializer(serializers.ModelSerializer):
@@ -36,21 +37,7 @@ class CreateUserSerializer(serializers.ModelSerializer):
 
         actor = request.user
 
-        allowed_roles = {
-            User.Role.SUPERADMIN: {
-                User.Role.ADMIN,
-                User.Role.SME,
-                User.Role.PRODUCTION_USER,
-                User.Role.VALIDATION_USER,
-            },
-            User.Role.ADMIN: {
-                User.Role.SME,
-                User.Role.PRODUCTION_USER,
-                User.Role.VALIDATION_USER,
-            },
-        }.get(actor.role, set())
-
-        if value not in allowed_roles:
+        if not can_create_user_with_role(actor.role, value):
             raise serializers.ValidationError("You are not allowed to create this type of user.")
 
         return value

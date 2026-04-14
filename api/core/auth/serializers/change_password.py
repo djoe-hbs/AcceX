@@ -4,6 +4,7 @@ from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
 from core.user.models import User
+from core.permissions import can_change_other_password
 
 
 class ChangePasswordSerializer(serializers.Serializer):
@@ -33,21 +34,7 @@ class ChangePasswordSerializer(serializers.Serializer):
             if not actor.check_password(old_password):
                 raise serializers.ValidationError({"old_password": "Old password is incorrect."})
         else:
-            allowed_roles = {
-                User.Role.SUPERADMIN: {
-                    User.Role.ADMIN,
-                    User.Role.SME,
-                    User.Role.PRODUCTION_USER,
-                    User.Role.VALIDATION_USER,
-                },
-                User.Role.ADMIN: {
-                    User.Role.SME,
-                    User.Role.PRODUCTION_USER,
-                    User.Role.VALIDATION_USER,
-                },
-            }.get(actor.role, set())
-
-            if target_user.role not in allowed_roles:
+            if not can_change_other_password(actor.role, target_user.role):
                 raise serializers.ValidationError({"target_user_id": "You are not allowed to change this user's password."})
 
         validate_password(attrs["new_password"], user=target_user)
