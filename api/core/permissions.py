@@ -44,3 +44,7 @@ def is_superadmin(user):
 
 def is_admin(user):
     return bool(user and getattr(user, "role", None) == User.Role.ADMIN)
+
+
+def can_manage_work_batches(user):
+    return is_superadmin(user) or is_admin(user)

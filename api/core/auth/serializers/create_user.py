@@ -45,7 +45,7 @@ class CreateUserSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data):
         password = validated_data.pop("password")
-        role = validated_data.get("role")
+        role = validated_data.pop("role")
 
         user_creator = {
             User.Role.ADMIN: User.objects.create_admin,

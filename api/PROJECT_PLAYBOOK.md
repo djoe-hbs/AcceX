@@ -48,6 +48,24 @@ High-level business flow:
 - Centralized role-permission helpers added in `core/permissions.py`
 - Auth/client role checks refactored to use shared permission helpers
 
+- `core.work` (Phase B/C baseline)
+- Zip batch upload for admin/superadmin.
+- Recursive archive extraction for nested zip files.
+- Local storage extraction pipeline (current phase target).
+- File tree persistence with directory + file hierarchy.
+- File table metadata captured per batch:
+  - name
+  - relative path
+  - file type
+  - count type
+  - count
+  - size
+- Counting implemented:
+  - pdf -> pages
+  - docx -> pages (page-break based estimation)
+  - excel -> rows
+  - other -> lines
+
 ### In Progress / Pending
 - Domain apps for work execution lifecycle (upload, extract, assign, validate, delivery).
 - Invoice generation and monthly mail (25th).
@@ -66,20 +84,22 @@ Use this section as the living task tracker.
 - [x] Centralized permissions helpers (to avoid duplicating role checks)
 
 ### Phase B: Work Intake
-- [ ] App: `core.work` (or similar) for job/task/batch entities
-- [ ] Upload endpoint for zip/files by superadmin/admin
-- [ ] Persist raw upload metadata
-- [ ] Recursive archive extraction (zip-inside-zip, nested folders)
+- [x] App: `core.work` (or similar) for job/task/batch entities
+- [x] Upload endpoint for zip/files by superadmin/admin
+- [x] Persist raw upload metadata
+- [x] Recursive archive extraction (zip-inside-zip, nested folders)
 - [ ] Store extracted files in S3 with full path mapping
-- [ ] Maintain file tree table (parent/child relationships)
+- [x] Maintain file tree table (parent/child relationships)
+- [ ] Harden with async background processing for very large archives
 
 ### Phase C: File Intelligence
-- [ ] File-type detection (pdf/docx/xlsx/others)
-- [ ] Count extraction per file:
+- [x] File-type detection (pdf/docx/xlsx/others)
+- [x] Count extraction per file:
   - pdf -> page count
   - word -> page count
   - excel -> row count
 - [ ] Store file metrics + size + checksum + mime type
+- [x] Basic failure capture on batch processing errors
 - [ ] Retry/failure handling for corrupt files
 
 ### Phase D: Assignment Engine

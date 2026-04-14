@@ -27,15 +27,22 @@ class UserSerializer(serializers.ModelSerializer):
             "profile_id",
         ]
 
-    # def get_profile_id(self, obj):
-    #     try:
-    #         if obj.role == User.Role.CUSTOMER and hasattr(obj, "customer_profile"):
-    #             return obj.customer_profile.public_id.hex
-    #         elif obj.role == User.Role.TAILOR and hasattr(obj, "tailor_profile"):
-    #             return obj.tailor_profile.public_id.hex
-    #     except Exception:
-    #         return None
-    #     return None
+    def get_profile_id(self, obj):
+        try:
+            if obj.role == User.Role.SUPERADMIN and hasattr(obj, "sadmin_profile"):
+                return obj.sadmin_profile.public_id.hex
+            if obj.role == User.Role.ADMIN and hasattr(obj, "admin_profile"):
+                return obj.admin_profile.public_id.hex
+            if obj.role == User.Role.SME and hasattr(obj, "sme_profile"):
+                return obj.sme_profile.public_id.hex
+            if obj.role == User.Role.PRODUCTION_USER and hasattr(obj, "produ_profile"):
+                return obj.produ_profile.public_id.hex
+            if obj.role == User.Role.VALIDATION_USER and hasattr(obj, "valiu_profile"):
+                return obj.valiu_profile.public_id.hex
+        except Exception:
+            return None
+
+        return None
 
     def validate_email(self, value):
         if User.objects.filter(email__iexact=value).exists():
