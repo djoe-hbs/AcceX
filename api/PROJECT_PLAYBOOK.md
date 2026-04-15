@@ -135,10 +135,11 @@ Use this section as the living task tracker.
 - [ ] Extend status flow to delivery-level states
 
 ### Phase F: Delivery + Feedback
-- [ ] Partial and full completion packaging into zip
-- [ ] Delivery endpoints for admin/superadmin
-- [ ] Client feedback upload + mapping to existing work items
-- [ ] Rework cycle support and audit trail
+- [x] Partial and full completion packaging into zip
+- [x] Delivery endpoints for admin/superadmin
+- [x] Client feedback upload + mapping to existing work items
+- [x] Rework cycle support and audit trail
+- [x] Batch sign-off endpoint for admin/superadmin
 
 ### Phase G: Billing + Analytics
 - [ ] Cost calculation using client-specific rules

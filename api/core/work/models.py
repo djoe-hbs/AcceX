@@ -12,6 +12,12 @@ class WorkBatch(models.Model):
         READY = "READY"
         FAILED = "FAILED"
 
+    class DeliveryStatus(models.TextChoices):
+        IN_PROGRESS = "IN_PROGRESS"
+        CLIENT_REVIEW_PENDING = "CLIENT_REVIEW_PENDING"
+        REWORK_REQUESTED = "REWORK_REQUESTED"
+        SIGNED_OFF = "SIGNED_OFF"
+
     public_id = models.UUIDField(db_index=True, unique=True, editable=False, default=uuid.uuid4)
 
     name = models.CharField(max_length=255)
@@ -27,6 +33,14 @@ class WorkBatch(models.Model):
     auto_refill_enabled = models.BooleanField(default=True)
     auto_batch_size_per_production_user = models.PositiveIntegerField(default=50)
     overdue_hours = models.PositiveIntegerField(default=24)
+    delivery_status = models.CharField(max_length=32, choices=DeliveryStatus.choices, default=DeliveryStatus.IN_PROGRESS, db_index=True)
+    initiated_by_sme = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="initiated_work_batches",
+    )
 
     uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="work_batches_uploaded")
 
@@ -208,6 +222,56 @@ class WorkUnitAlert(models.Model):
     reported_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="reported_work_alerts")
 
     is_resolved = models.BooleanField(default=False, db_index=True)
+
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+
+class WorkDeliveryPackage(models.Model):
+    class Mode(models.TextChoices):
+        COMPLETED_ONLY = "COMPLETED_ONLY"
+        INCLUDE_INCOMPLETE = "INCLUDE_INCOMPLETE"
+
+    public_id = models.UUIDField(db_index=True, unique=True, editable=False, default=uuid.uuid4)
+
+    batch = models.ForeignKey(WorkBatch, on_delete=models.CASCADE, related_name="delivery_packages")
+    mode = models.CharField(max_length=24, choices=Mode.choices, db_index=True)
+    archive = models.FileField(upload_to="work/delivery")
+    total_files = models.PositiveIntegerField(default=0)
+
+    generated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="generated_delivery_packages",
+    )
+
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+
+class WorkClientReview(models.Model):
+    public_id = models.UUIDField(db_index=True, unique=True, editable=False, default=uuid.uuid4)
+
+    batch = models.ForeignKey(WorkBatch, on_delete=models.CASCADE, related_name="client_reviews")
+    review_file = models.FileField(upload_to="work/client_review")
+    review_note = models.TextField(blank=True, null=True)
+
+    uploaded_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="uploaded_client_reviews",
+    )
+    assigned_to_sme = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_client_reviews",
+    )
 
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
