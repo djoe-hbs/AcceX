@@ -65,10 +65,18 @@ export default function MyTasksPage() {
               </div>
               <div className="flex items-center gap-2">
                 <ChunkStatusBadge status={task.status} />
-                <a href={task.download_url} className="btn-secondary py-1.5 text-xs">
+                <button
+                  type="button"
+                  className="btn-secondary py-1.5 text-xs"
+                  onClick={() =>
+                    chunksApi.downloadSource(task.chunk_id).catch(() =>
+                      setMessage({ type: 'error', text: 'Failed to download source file.' })
+                    )
+                  }
+                >
                   <Download className="w-3.5 h-3.5" />
                   Source
-                </a>
+                </button>
                 {task.status !== 'completed' && task.status !== 'in_validation' && (
                   <button className="btn-primary py-1.5 text-xs" onClick={() => setSelectedTask(task)}>
                     <Upload className="w-3.5 h-3.5" />

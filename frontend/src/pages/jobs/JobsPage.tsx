@@ -13,7 +13,7 @@ import {
 } from '@/components/shared'
 import { FileTreeViewer } from '@/components/shared/FileTree'
 import { useAuth } from '@/store/auth'
-import { ChevronRight, Plus, Upload, Users } from 'lucide-react'
+import { ChevronRight, Plus, Trash2, Upload, UserCheck, Users } from 'lucide-react'
 
 export function JobsListPage() {
   const { isRole } = useAuth()
@@ -222,13 +222,12 @@ export function JobDetailPage() {
             </div>
             <div className="space-y-3">
               {members.map((member: any) => (
-                <div key={member.id} className="flex items-center justify-between rounded-lg border border-gray-100 p-3">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">{member.user_name}</p>
-                    <p className="text-xs text-gray-500">{member.user_email}</p>
-                  </div>
-                  <Badge variant={member.role === 'PRODUCTION' ? 'green' : 'yellow'}>{member.role}</Badge>
-                </div>
+                <MemberRow
+                  key={member.id}
+                  member={member}
+                  batchId={id || ''}
+                  canManage={Boolean(isRole('sme') && id)}
+                />
               ))}
               {members.length === 0 && <EmptyState title="No members yet" description="SME can add production and validation users to this batch." />}
             </div>
@@ -236,24 +235,20 @@ export function JobDetailPage() {
 
           <div className="card">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="font-semibold text-gray-900">Units</h2>
+              <h2 className="font-semibold text-gray-900">Assigned Files</h2>
               <Badge variant="purple">{units.length}</Badge>
             </div>
-            <div className="space-y-3">
-              {units.slice(0, 8).map((unit: any) => (
-                <div key={unit.chunk_id} className="rounded-lg border border-gray-100 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{unit.file_name}</p>
-                      <p className="text-xs text-gray-500">
-                        {unit.unit_start || unit.unit_end ? `${unit.unit_start || '?'} - ${unit.unit_end || '?'}` : 'Whole file'}
-                      </p>
-                    </div>
-                    <ChunkStatusPill status={unit.status} />
-                  </div>
-                </div>
+            <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+              {units.map((unit: any) => (
+                <UnitRow
+                  key={unit.chunk_id}
+                  unit={unit}
+                  members={members}
+                  batchId={id || ''}
+                  canManage={Boolean(isRole('sme') && id)}
+                />
               ))}
-              {units.length === 0 && <EmptyState title="No units yet" description="Units appear here after auto-assignment is run." />}
+              {units.length === 0 && <EmptyState title="No assigned files yet" description="Files appear here after auto-assignment is run." />}
             </div>
             {isRole('sme') && id && <AutoAssignPanel batchId={id} />}
           </div>
@@ -275,8 +270,8 @@ function ManageMembers({ batchId }: { batchId: string }) {
   const [error, setError] = useState('')
 
   const { data: usersData } = useQuery({
-    queryKey: ['assignable-users'],
-    queryFn: () => usersApi.list(),
+    queryKey: ['assignable-users', 'available'],
+    queryFn: () => usersApi.list({ available: true }),
   })
 
   const users = useMemo(() => {
@@ -339,8 +334,8 @@ function AutoAssignPanel({ batchId }: { batchId: string }) {
   const [error, setError] = useState('')
 
   const { data: usersData } = useQuery({
-    queryKey: ['assignment-users'],
-    queryFn: () => usersApi.list(),
+    queryKey: ['assignment-users', 'available'],
+    queryFn: () => usersApi.list({ available: true }),
   })
 
   const productionUsers = (usersData?.data || []).filter((user: any) => user.role === 'production')
@@ -355,6 +350,8 @@ function AutoAssignPanel({ batchId }: { batchId: string }) {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
+      queryClient.invalidateQueries({ queryKey: ['assignment-users', 'available'] })
+      queryClient.invalidateQueries({ queryKey: ['assignable-users', 'available'] })
       setError('')
     },
     onError: (err: any) => setError(err.response?.data?.detail || 'Auto-assignment failed.'),
@@ -405,5 +402,189 @@ function AutoAssignPanel({ batchId }: { batchId: string }) {
         </button>
       </div>
     </div>
+  )
+}
+
+function MemberRow({ member, batchId, canManage }: { member: any; batchId: string; canManage: boolean }) {
+  const queryClient = useQueryClient()
+  const [error, setError] = useState('')
+
+  const removeMutation = useMutation({
+    mutationFn: () =>
+      jobsApi.removeMember(batchId, { user_id: member.user_id, role: member.role }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['job-members', batchId] })
+      queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
+      queryClient.invalidateQueries({ queryKey: ['assignment-users', 'available'] })
+      queryClient.invalidateQueries({ queryKey: ['assignable-users', 'available'] })
+    },
+    onError: (err: any) => setError(err.response?.data?.detail || 'Unable to remove member.'),
+  })
+
+  return (
+    <div className="rounded-lg border border-gray-100 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-gray-900">{member.user_name}</p>
+          <p className="text-xs text-gray-500">{member.user_email}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant={member.role === 'PRODUCTION' ? 'green' : 'yellow'}>{member.role}</Badge>
+          {canManage && (
+            <button
+              type="button"
+              className="btn-secondary py-1 px-2 text-xs"
+              title="Remove member (their active units will be returned to pending)"
+              disabled={removeMutation.isPending}
+              onClick={() => {
+                if (window.confirm(`Remove ${member.user_name} from this job? Their active units will be returned to pending.`)) {
+                  removeMutation.mutate()
+                }
+              }}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+      {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+    </div>
+  )
+}
+
+function UnitRow({
+  unit,
+  members,
+  batchId,
+  canManage,
+}: {
+  unit: any
+  members: any[]
+  batchId: string
+  canManage: boolean
+}) {
+  const [assignOpen, setAssignOpen] = useState(false)
+  const prodMember = members.find((m: any) => m.user_id === unit.production_user_id)
+  const isPending = unit.status === 'pending'
+
+  return (
+    <div className="rounded-lg border border-gray-100 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-gray-900">{unit.file_name}</p>
+          <p className="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
+            <span>{unit.unit_start || unit.unit_end ? `${unit.unit_start || '?'} - ${unit.unit_end || '?'}` : 'Whole file'}</span>
+            {prodMember && (
+              <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-md text-[10px] font-medium uppercase tracking-wide">
+                {prodMember.user_name}
+              </span>
+            )}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <ChunkStatusPill status={unit.status} />
+          {canManage && isPending && (
+            <button
+              type="button"
+              className="btn-secondary py-1 px-2 text-xs"
+              title="Manually assign this unit"
+              onClick={() => setAssignOpen(true)}
+            >
+              <UserCheck className="w-3.5 h-3.5" />
+              Assign
+            </button>
+          )}
+        </div>
+      </div>
+      {assignOpen && (
+        <ManualAssignModal
+          unit={unit}
+          batchId={batchId}
+          onClose={() => setAssignOpen(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+function ManualAssignModal({
+  unit,
+  batchId,
+  onClose,
+}: {
+  unit: any
+  batchId: string
+  onClose: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [productionUserId, setProductionUserId] = useState('')
+  const [validationUserId, setValidationUserId] = useState('')
+  const [error, setError] = useState('')
+
+  const { data: membersData } = useQuery({
+    queryKey: ['job-members', batchId],
+    queryFn: () => jobsApi.members(batchId),
+  })
+
+  const members = membersData?.data || []
+  const productionMembers = members.filter((m: any) => m.role === 'PRODUCTION')
+  const validationMembers = members.filter((m: any) => m.role === 'VALIDATION')
+
+  const assignMutation = useMutation({
+    mutationFn: () =>
+      chunksApi.manualAssign(unit.chunk_id, {
+        production_user_id: productionUserId,
+        validation_user_id: validationUserId,
+        reason: 'Manual assignment by SME.',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
+      queryClient.invalidateQueries({ queryKey: ['assignment-users', 'available'] })
+      queryClient.invalidateQueries({ queryKey: ['assignable-users', 'available'] })
+      onClose()
+    },
+    onError: (err: any) => setError(err.response?.data?.detail || 'Manual assignment failed.'),
+  })
+
+  return (
+    <Modal open onClose={onClose} title={`Assign "${unit.file_name}"`} size="sm">
+      <div className="space-y-4">
+        {error && <Alert type="error" message={error} />}
+        {productionMembers.length === 0 && (
+          <Alert type="error" message="No production members on this job. Add one first." />
+        )}
+        {validationMembers.length === 0 && (
+          <Alert type="error" message="No validation members on this job. Add one first." />
+        )}
+        <div>
+          <label className="label">Production user</label>
+          <select className="input" value={productionUserId} onChange={(e) => setProductionUserId(e.target.value)}>
+            <option value="">Select production user</option>
+            {productionMembers.map((m: any) => (
+              <option key={m.user_id} value={m.user_id}>{m.user_name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="label">Validation user</label>
+          <select className="input" value={validationUserId} onChange={(e) => setValidationUserId(e.target.value)}>
+            <option value="">Select validation user</option>
+            {validationMembers.map((m: any) => (
+              <option key={m.user_id} value={m.user_id}>{m.user_name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button
+            className="btn-primary"
+            onClick={() => assignMutation.mutate()}
+            disabled={!productionUserId || !validationUserId || assignMutation.isPending}
+          >
+            {assignMutation.isPending ? 'Assigning...' : 'Assign'}
+          </button>
+        </div>
+      </div>
+    </Modal>
   )
 }

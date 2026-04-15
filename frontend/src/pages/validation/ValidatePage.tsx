@@ -62,10 +62,18 @@ export default function ValidatePage() {
               <div className="flex items-center gap-2">
                 <ChunkStatusBadge status={task.status} />
                 {task.production_download_url && (
-                  <a href={task.production_download_url} className="btn-secondary py-1.5 text-xs">
+                  <button
+                    type="button"
+                    className="btn-secondary py-1.5 text-xs"
+                    onClick={() =>
+                      chunksApi.downloadProduction(task.chunk_id).catch(() =>
+                        setMessage({ type: 'error', text: 'Failed to download production file.' })
+                      )
+                    }
+                  >
                     <Download className="w-3.5 h-3.5" />
                     Output
-                  </a>
+                  </button>
                 )}
                 <button
                   className="btn-success py-1.5 text-xs"

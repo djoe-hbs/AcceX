@@ -73,6 +73,32 @@ function mapUnit(unit: any) {
   }
 }
 
+function extractListData(payload: any) {
+  if (Array.isArray(payload)) {
+    return payload
+  }
+
+  if (Array.isArray(payload?.results)) {
+    return payload.results
+  }
+
+  return []
+}
+
+async function fetchAllPages(url: string) {
+  let nextUrl: string | null = url
+  const items: any[] = []
+
+  while (nextUrl) {
+    const response: any = await api.get(nextUrl)
+    const pageItems = extractListData(response.data)
+    items.push(...pageItems)
+    nextUrl = response.data?.next || null
+  }
+
+  return items
+}
+
 function buildFileTree(files: any[]) {
   const roots: any[] = []
   const folders = new Map<string, any>()
@@ -207,7 +233,7 @@ export const authApi = {
 }
 
 export const usersApi = {
-  list: async (params?: { role?: string; is_active?: boolean }) => {
+  list: async (params?: { role?: string; is_active?: boolean; available?: boolean }) => {
     const roleParam = params?.role
       ? {
           superadmin: 'SUPERADMIN',
@@ -218,17 +244,14 @@ export const usersApi = {
         }[params.role] || params.role
       : undefined
 
-    const response = await api.get('/user/', {
-      params: {
-        role: roleParam,
-        is_active: params?.is_active,
-      },
-    })
+    const query = new URLSearchParams()
+    if (roleParam) query.set('role', roleParam)
+    if (params?.is_active !== undefined) query.set('is_active', String(params.is_active))
+    if (params?.available) query.set('available', 'true')
 
-    return {
-      ...response,
-      data: response.data.map(mapUser),
-    }
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    const data = await fetchAllPages(`/user/${suffix}`)
+    return { data: data.map(mapUser) }
   },
   get: async (id: string) => {
     const response = await api.get(`/user/${id}/`)
@@ -253,8 +276,8 @@ export const usersApi = {
 
 export const clientsApi = {
   list: async () => {
-    const response = await api.get('/client/')
-    return response
+    const data = await fetchAllPages('/client/')
+    return { data }
   },
   get: (id: string) => api.get(`/client/${id}/`),
   create: (data: object) => api.post('/client/', data),
@@ -263,8 +286,8 @@ export const clientsApi = {
 
 export const jobsApi = {
   list: async () => {
-    const response = await api.get('/work/batch/')
-    return { ...response, data: response.data.map(mapBatch) }
+    const data = await fetchAllPages('/work/batch/')
+    return { data: data.map(mapBatch) }
   },
   get: async (id: string) => {
     const response = await api.get(`/work/batch/${id}/`)
@@ -277,14 +300,17 @@ export const jobsApi = {
     return { ...response, data: mapBatch(response.data) }
   },
   files: async (id: string) => {
-    const response = await api.get(`/work/batch/${id}/files/`)
-    return response
+    const data = await fetchAllPages(`/work/batch/${id}/files/`)
+    return { data }
   },
   fileTree: async (id: string) => {
     const response = await jobsApi.files(id)
     return { ...response, data: buildFileTree(response.data) }
   },
-  members: (id: string) => api.get(`/work/batch/${id}/members/`),
+  members: async (id: string) => {
+    const data = await fetchAllPages(`/work/batch/${id}/members/`)
+    return { data }
+  },
   addMember: (id: string, data: { user_id: string; role: 'PRODUCTION' | 'VALIDATION' }) =>
     api.post(`/work/batch/${id}/members/add/`, data),
   removeMember: (id: string, data: { user_id: string; role: 'PRODUCTION' | 'VALIDATION' }) =>
@@ -303,19 +329,18 @@ export const jobsApi = {
 
 export const chunksApi = {
   myTasks: async () => {
-    const response = await api.get('/work/unit/')
-    return { ...response, data: response.data.map(mapUnit) }
+    const data = await fetchAllPages('/work/unit/')
+    return { data: data.map(mapUnit) }
   },
   myValidationTasks: async () => {
-    const response = await api.get('/work/unit/')
+    const data = await fetchAllPages('/work/unit/')
     return {
-      ...response,
-      data: response.data.map(mapUnit).filter((unit: any) => unit.status === 'in_validation'),
+      data: data.map(mapUnit).filter((unit: any) => unit.status === 'in_validation'),
     }
   },
   byBatch: async (batchId: string) => {
-    const response = await api.get('/work/unit/', { params: { batch_id: batchId } })
-    return { ...response, data: response.data.map(mapUnit) }
+    const data = await fetchAllPages(`/work/unit/?batch_id=${encodeURIComponent(batchId)}`)
+    return { data: data.map(mapUnit) }
   },
   get: async (id: string) => {
     const response = await api.get(`/work/unit/${id}/`)
@@ -332,6 +357,35 @@ export const chunksApi = {
     }),
   reassignProduction: (id: string, data: { new_production_user_id: string; reason?: string }) =>
     api.post(`/work/unit/${id}/reassign-production/`, data),
+  manualAssign: (id: string, data: { production_user_id: string; validation_user_id: string; reason?: string }) =>
+    api.post(`/work/unit/${id}/manual-assign/`, data),
+  downloadSource: (id: string) => downloadUnitFile(`/work/unit/${id}/download-source/`),
+  downloadProduction: (id: string) => downloadUnitFile(`/work/unit/${id}/download-production/`),
+}
+
+async function downloadUnitFile(path: string) {
+  const response = await api.get(path, { responseType: 'blob' })
+
+  let filename = 'download'
+  const disposition = response.headers?.['content-disposition'] as string | undefined
+  if (disposition) {
+    const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(disposition)
+    const plainMatch = /filename="?([^";]+)"?/i.exec(disposition)
+    if (utf8Match) {
+      filename = decodeURIComponent(utf8Match[1])
+    } else if (plainMatch) {
+      filename = plainMatch[1]
+    }
+  }
+
+  const blobUrl = window.URL.createObjectURL(response.data)
+  const anchor = document.createElement('a')
+  anchor.href = blobUrl
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  window.URL.revokeObjectURL(blobUrl)
 }
 
 export const analyticsApi = {

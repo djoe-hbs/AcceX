@@ -89,14 +89,14 @@ export function Modal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className={clsx('relative bg-white rounded-xl shadow-xl w-full', sizeClass)}>
-        <div className="flex items-center justify-between p-5 border-b border-gray-100">
+      <div className={clsx('relative bg-white rounded-xl shadow-xl w-full max-h-[90vh] flex flex-col', sizeClass)}>
+        <div className="flex-shrink-0 flex items-center justify-between p-5 border-b border-gray-100">
           <h2 className="text-base font-semibold text-gray-900">{title}</h2>
           <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 transition-colors">
             <X className="w-4 h-4 text-gray-500" />
           </button>
         </div>
-        <div className="p-5">{children}</div>
+        <div className="p-5 overflow-y-auto">{children}</div>
       </div>
     </div>
   )
