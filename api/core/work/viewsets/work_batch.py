@@ -1,4 +1,6 @@
 from django.core.exceptions import ObjectDoesNotExist
+from pathlib import Path
+from django.http import FileResponse
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -7,15 +9,24 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from core.permissions import can_manage_work_batches, is_sme
-from core.work.models import WorkBatch, WorkBatchMember, WorkUnit
+from core.work.models import WorkBatch, WorkBatchMember, WorkUnit, WorkDeliveryPackage, WorkClientReview
 from core.work.serializers import (
     WorkBatchSerializer,
     WorkFileSerializer,
     WorkBatchMemberSerializer,
     AddBatchMemberSerializer,
     RemoveBatchMemberSerializer,
+    DeliveryPackageRequestSerializer,
+    DeliveryPackageSerializer,
+    ClientReviewUploadSerializer,
+    BatchSignOffSerializer,
 )
-from core.work.services import unassign_unit
+from core.work.services import (
+    unassign_unit,
+    generate_delivery_package,
+    apply_client_review,
+    mark_batch_signed_off,
+)
 
 
 class WorkBatchViewSet(viewsets.ModelViewSet):
@@ -63,6 +74,95 @@ class WorkBatchViewSet(viewsets.ModelViewSet):
 
         serializer = WorkFileSerializer(queryset, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="delivery/generate")
+    def generate_delivery(self, request, pk=None):
+        if not can_manage_work_batches(request.user):
+            raise PermissionDenied("Only superadmin and admin can generate delivery packages.")
+
+        batch = self.get_object()
+        serializer = DeliveryPackageRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        package = generate_delivery_package(
+            batch=batch,
+            mode=serializer.validated_data["mode"],
+            generated_by=request.user,
+        )
+
+        if not package:
+            raise NotFound("No eligible files found to include in package.")
+
+        return Response(DeliveryPackageSerializer(package).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"], url_path="delivery/packages")
+    def delivery_packages(self, request, pk=None):
+        if not can_manage_work_batches(request.user):
+            raise PermissionDenied("Only superadmin and admin can access delivery packages.")
+
+        batch = self.get_object()
+        queryset = batch.delivery_packages.order_by("-created")
+
+        serializer = DeliveryPackageSerializer(queryset, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path=r"delivery/download/(?P<package_id>[^/.]+)")
+    def download_delivery(self, request, pk=None, package_id=None):
+        if not can_manage_work_batches(request.user):
+            raise PermissionDenied("Only superadmin and admin can download delivery packages.")
+
+        batch = self.get_object()
+        try:
+            package = WorkDeliveryPackage.objects.get(batch=batch, public_id=package_id)
+        except (WorkDeliveryPackage.DoesNotExist, ValueError, TypeError):
+            raise NotFound("Delivery package not found.")
+
+        archive_path = Path(package.archive.path)
+        if not archive_path.exists() or not archive_path.is_file():
+            raise NotFound("Delivery archive not found.")
+
+        handle = open(archive_path, "rb")
+        return FileResponse(handle, as_attachment=True, filename=archive_path.name)
+
+    @action(detail=True, methods=["post"], url_path="client-review/upload")
+    def upload_client_review(self, request, pk=None):
+        if not can_manage_work_batches(request.user):
+            raise PermissionDenied("Only superadmin and admin can upload client review.")
+
+        batch = self.get_object()
+        serializer = ClientReviewUploadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        review = apply_client_review(
+            batch=batch,
+            review_file=serializer.validated_data["review_file"],
+            review_note=serializer.validated_data.get("review_note", ""),
+            uploaded_by=request.user,
+        )
+
+        return Response(ClientReviewUploadSerializer(review).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"], url_path="client-review")
+    def client_reviews(self, request, pk=None):
+        if not self._has_read_access():
+            raise PermissionDenied("Only superadmin/admin/SME can access client review records.")
+
+        batch = self.get_object()
+        queryset = WorkClientReview.objects.filter(batch=batch).order_by("-created")
+        serializer = ClientReviewUploadSerializer(queryset, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="sign-off")
+    def sign_off(self, request, pk=None):
+        if not can_manage_work_batches(request.user):
+            raise PermissionDenied("Only superadmin and admin can sign off.")
+
+        batch = self.get_object()
+        serializer = BatchSignOffSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        updated_batch = mark_batch_signed_off(batch, serializer.validated_data["signed_off"])
+        return Response(WorkBatchSerializer(updated_batch).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get"], url_path="members")
     def members(self, request, pk=None):

@@ -1,13 +1,22 @@
 from django.contrib import admin
 
-from core.work.models import WorkBatch, WorkBatchMember, WorkFile, WorkUnit, WorkUnitAssignment, WorkUnitAlert
+from core.work.models import (
+    WorkBatch,
+    WorkBatchMember,
+    WorkFile,
+    WorkUnit,
+    WorkUnitAssignment,
+    WorkUnitAlert,
+    WorkDeliveryPackage,
+    WorkClientReview,
+)
 
 
 @admin.register(WorkBatch)
 class WorkBatchAdmin(admin.ModelAdmin):
-    list_display = ("name", "client", "status", "total_files", "total_directories", "uploaded_by", "created")
+    list_display = ("name", "client", "status", "delivery_status", "total_files", "total_directories", "uploaded_by", "created")
     search_fields = ("name", "client__name", "uploaded_by__email")
-    list_filter = ("status", "created")
+    list_filter = ("status", "delivery_status", "created")
 
 
 @admin.register(WorkBatchMember)
@@ -46,3 +55,17 @@ class WorkUnitAlertAdmin(admin.ModelAdmin):
     list_display = ("unit", "alert_type", "is_resolved", "reported_by", "created")
     search_fields = ("unit__work_file__relative_path", "message")
     list_filter = ("alert_type", "is_resolved")
+
+
+@admin.register(WorkDeliveryPackage)
+class WorkDeliveryPackageAdmin(admin.ModelAdmin):
+    list_display = ("batch", "mode", "total_files", "generated_by", "created")
+    search_fields = ("batch__name", "generated_by__email")
+    list_filter = ("mode", "created")
+
+
+@admin.register(WorkClientReview)
+class WorkClientReviewAdmin(admin.ModelAdmin):
+    list_display = ("batch", "uploaded_by", "assigned_to_sme", "created")
+    search_fields = ("batch__name", "uploaded_by__email", "assigned_to_sme__email")
+    list_filter = ("created",)

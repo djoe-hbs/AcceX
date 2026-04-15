@@ -113,8 +113,13 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         validated = serializer.validated_data
+        batch = validated["batch"]
+        if not batch.initiated_by_sme:
+            batch.initiated_by_sme = request.user
+            batch.save(update_fields=["initiated_by_sme", "updated"])
+
         assigned_count = auto_assign_units(
-            batch=validated["batch"],
+            batch=batch,
             production_users=validated["production_users"],
             validation_users=validated["validation_users"],
             assigned_by=request.user,
@@ -145,6 +150,10 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
             assigned_by=request.user,
             reason=serializer.validated_data.get("reason", ""),
         )
+
+        if not unit.batch.initiated_by_sme:
+            unit.batch.initiated_by_sme = request.user
+            unit.batch.save(update_fields=["initiated_by_sme", "updated"])
 
         return Response({"detail": "Unit assigned successfully."}, status=status.HTTP_200_OK)
 
