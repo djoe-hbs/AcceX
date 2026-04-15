@@ -66,6 +66,19 @@ High-level business flow:
   - excel -> rows
   - other -> lines
 
+- Phase D/E assignment + lifecycle baseline
+- `WorkUnit` chunk model added for incremental assignment.
+- Auto assignment API for SME:
+  - assign limited units per production user per run
+  - map each unit to validation user
+- Large file split support (page/row/line chunk ranges).
+- Production/validation lifecycle APIs:
+  - production submit
+  - validator approve
+  - validator redo with mandatory reason
+  - SME reassign production user
+- Issue and overdue alert models for SME visibility.
+
 ### In Progress / Pending
 - Domain apps for work execution lifecycle (upload, extract, assign, validate, delivery).
 - Invoice generation and monthly mail (25th).
@@ -103,24 +116,23 @@ Use this section as the living task tracker.
 - [ ] Retry/failure handling for corrupt files
 
 ### Phase D: Assignment Engine
-- [ ] SME assignment UI/API support
+- [x] SME assignment API support
 - [ ] Idle/capacity model for production + validation users
-- [ ] Auto-assignment algorithm for balanced workload
-- [ ] Support file splitting for large-count files (e.g., 100+ page PDF)
-- [ ] Preserve ownership mapping for redo loop (validator -> same production user)
+- [x] Auto-assignment algorithm for balanced workload
+- [x] Support file splitting for large-count files (e.g., 100+ page PDF)
+- [x] Preserve ownership mapping for redo loop (validator -> same production user)
 
 ### Phase E: Execution + Validation
-- [ ] Production download/upload completion flow
-- [ ] Validation pass/fail with mandatory redo reason
-- [ ] Requeue redo to original production user
-- [ ] Status machine for each work item:
-  - uploaded
-  - assigned
-  - in_production
+- [x] Production submit flow (unit -> validation)
+- [x] Validation pass/fail with mandatory redo reason
+- [x] Requeue redo to original production user
+- [x] Status machine for work units (current implementation):
+  - pending
+  - assigned_to_production
   - in_validation
   - redo
-  - done
-  - delivered
+  - completed
+- [ ] Extend status flow to delivery-level states
 
 ### Phase F: Delivery + Feedback
 - [ ] Partial and full completion packaging into zip

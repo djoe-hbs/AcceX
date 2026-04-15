@@ -48,3 +48,15 @@ def is_admin(user):
 
 def can_manage_work_batches(user):
     return is_superadmin(user) or is_admin(user)
+
+
+def is_sme(user):
+    return bool(user and getattr(user, "role", None) == User.Role.SME)
+
+
+def is_production_user(user):
+    return bool(user and getattr(user, "role", None) == User.Role.PRODUCTION_USER)
+
+
+def is_validation_user(user):
+    return bool(user and getattr(user, "role", None) == User.Role.VALIDATION_USER)
