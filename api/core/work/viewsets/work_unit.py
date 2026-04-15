@@ -56,15 +56,24 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
         ).all()
 
         if can_manage_work_batches(user) or is_sme(user):
-            return queryset
+            filtered = queryset
+        elif is_production_user(user):
+            filtered = queryset.filter(current_production_assignee=user).exclude(status=WorkUnit.Status.COMPLETED)
+        elif is_validation_user(user):
+            filtered = queryset.filter(current_validation_assignee=user, status=WorkUnit.Status.IN_VALIDATION)
+        else:
+            raise PermissionDenied("You do not have permission to access work units.")
 
-        if is_production_user(user):
-            return queryset.filter(current_production_assignee=user).exclude(status=WorkUnit.Status.COMPLETED)
+        batch_id = self.request.query_params.get("batch_id")
+        status_value = self.request.query_params.get("status")
 
-        if is_validation_user(user):
-            return queryset.filter(current_validation_assignee=user, status=WorkUnit.Status.IN_VALIDATION)
+        if batch_id:
+            filtered = filtered.filter(batch__public_id=batch_id)
 
-        raise PermissionDenied("You do not have permission to access work units.")
+        if status_value:
+            filtered = filtered.filter(status=status_value)
+
+        return filtered
 
     def get_object(self):
         try:

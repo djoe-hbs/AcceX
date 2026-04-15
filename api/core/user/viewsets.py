@@ -20,7 +20,17 @@ class UserViewSet(viewsets.ModelViewSet):
         user = self.request.user
 
         if user.is_staff:
-            return User.objects.all()
+            queryset = User.objects.all()
+            role = self.request.query_params.get("role")
+            is_active = self.request.query_params.get("is_active")
+
+            if role:
+                queryset = queryset.filter(role=role)
+
+            if is_active is not None:
+                queryset = queryset.filter(is_active=is_active.lower() == "true")
+
+            return queryset
         
         return User.objects.filter(public_id=user.public_id)
     
