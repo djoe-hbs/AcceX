@@ -112,9 +112,21 @@ function CreateJobModal({ onClose }: { onClose: () => void }) {
     },
   })
 
+  const MAX_UPLOAD_SIZE = 500 * 1024 * 1024 // 500 MB
+
   const handleSubmit = () => {
     if (!title || !clientId || !zipFile) {
       setError('Name, client, and ZIP archive are required.')
+      return
+    }
+
+    if (!zipFile.name.toLowerCase().endsWith('.zip')) {
+      setError('Only .zip files are accepted.')
+      return
+    }
+
+    if (zipFile.size > MAX_UPLOAD_SIZE) {
+      setError(`File exceeds the 500 MB limit (${(zipFile.size / 1024 / 1024).toFixed(1)} MB).`)
       return
     }
 
@@ -167,7 +179,7 @@ export function JobDetailPage() {
   const { isRole } = useAuth()
   const [downloading, setDownloading] = useState(false)
 
-  const { data: jobData, isLoading: jobLoading } = useQuery({
+  const { data: jobData, isLoading: jobLoading, isError: jobError } = useQuery({
     queryKey: ['job', id],
     queryFn: () => jobsApi.get(id || ''),
     enabled: Boolean(id),
@@ -193,6 +205,10 @@ export function JobDetailPage() {
 
   if (jobLoading || filesLoading || membersLoading || unitsLoading) {
     return <PageLoader />
+  }
+
+  if (jobError) {
+    return <Alert type="error" message="Failed to load job details. Please try again." />
   }
 
   const job = jobData?.data
@@ -517,7 +533,6 @@ function MemberRow({ member, batchId, canManage }: { member: any; batchId: strin
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['job-members', batchId] })
       queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
-      queryClient.invalidateQueries({ queryKey: ['assignment-users', 'available'] })
       queryClient.invalidateQueries({ queryKey: ['assignable-users', 'available'] })
       setShowConfirm(false)
     },
@@ -769,7 +784,6 @@ function ManualAssignModal({
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
-      queryClient.invalidateQueries({ queryKey: ['assignment-users', 'available'] })
       queryClient.invalidateQueries({ queryKey: ['assignable-users', 'available'] })
       onClose()
     },

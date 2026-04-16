@@ -1,8 +1,6 @@
 import { ReactNode, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/store/auth'
-import { useQuery } from '@tanstack/react-query'
-import { notifApi } from '@/api/client'
 import {
   LayoutDashboard, Users, Building2, Briefcase, FileText,
   Bell, LogOut, ChevronLeft, ChevronRight, Settings,
@@ -109,13 +107,8 @@ function TopBar() {
   const { user } = useAuth()
   const navigate = useNavigate()
 
-  const { data: notifs } = useQuery({
-    queryKey: ['notifications-unread'],
-    queryFn: () => notifApi.list(true),
-    refetchInterval: 30_000,
-  })
-
-  const unreadCount = notifs?.data?.length || 0
+  // TODO: enable polling once the notifications API is implemented
+  const unreadCount = 0
 
   return (
     <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-6 sticky top-0 z-10">

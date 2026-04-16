@@ -56,9 +56,9 @@ function TreeNodeRow({
         </div>
         {expanded && node.children && (
           <div>
-            {node.children.map((child, i) => (
+            {node.children.map((child) => (
               <TreeNodeRow
-                key={i}
+                key={child.full_path}
                 node={child}
                 depth={depth + 1}
                 onFileClick={onFileClick}
@@ -124,8 +124,8 @@ export function FileTreeViewer({
 
   return (
     <div className="font-mono text-sm">
-      {tree.map((node, i) => (
-        <TreeNodeRow key={i} node={node} depth={0} onFileClick={onFileClick} />
+      {tree.map((node) => (
+        <TreeNodeRow key={node.full_path} node={node} depth={0} onFileClick={onFileClick} />
       ))}
     </div>
   )

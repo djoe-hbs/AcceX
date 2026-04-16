@@ -1,8 +1,5 @@
-from django.core.exceptions import ObjectDoesNotExist
-
-from rest_framework import status
 from rest_framework import viewsets
-from rest_framework.response import Response
+from rest_framework.exceptions import NotFound
 from rest_framework.permissions import IsAuthenticated
 
 from core.admin.models import AdminProfile
@@ -13,7 +10,7 @@ class AdminProfileViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch"]
     serializer_class = AdminProfileSerializer
     permission_classes = (IsAuthenticated, )
-    
+
     def get_queryset(self):
         user = self.request.user
         if user.is_staff:
@@ -21,8 +18,9 @@ class AdminProfileViewSet(viewsets.ModelViewSet):
         return AdminProfile.objects.filter(user=user)
 
     def get_object(self):
+        queryset = self.get_queryset()
         try:
-            instance = AdminProfile.objects.get(public_id=self.kwargs["pk"])
+            instance = queryset.get(public_id=self.kwargs["pk"])
             return instance
-        except (ObjectDoesNotExist, ValueError, TypeError):
-            raise Response({"error": "Admin profile not found."}, status=status.HTTP_404_NOT_FOUND)
+        except (AdminProfile.DoesNotExist, ValueError, TypeError):
+            raise NotFound("Admin profile not found.")

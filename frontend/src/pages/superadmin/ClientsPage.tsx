@@ -194,6 +194,7 @@ function ClientModal({ client, onClose }: { client?: any; onClose: () => void })
                   className="input"
                   type="number"
                   step="0.01"
+                  min="0"
                   placeholder="Unit cost"
                   value={cost.unit_cost}
                   onChange={(e) => {

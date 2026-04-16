@@ -1,8 +1,5 @@
-from django.core.exceptions import ObjectDoesNotExist
-
-from rest_framework import status
 from rest_framework import viewsets
-from rest_framework.response import Response
+from rest_framework.exceptions import NotFound
 from rest_framework.permissions import IsAuthenticated
 
 from core.sadmin.models import SAdminProfile
@@ -13,7 +10,7 @@ class SAdminProfileViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch"]
     serializer_class = SAdminProfileSerializer
     permission_classes = (IsAuthenticated, )
-    
+
     def get_queryset(self):
         user = self.request.user
         if user.is_staff:
@@ -21,8 +18,9 @@ class SAdminProfileViewSet(viewsets.ModelViewSet):
         return SAdminProfile.objects.filter(user=user)
 
     def get_object(self):
+        queryset = self.get_queryset()
         try:
-            instance = SAdminProfile.objects.get(public_id=self.kwargs["pk"])
+            instance = queryset.get(public_id=self.kwargs["pk"])
             return instance
-        except (ObjectDoesNotExist, ValueError, TypeError):
-            raise Response({"error": "Super Admin user profile not found."}, status=status.HTTP_404_NOT_FOUND)
+        except (SAdminProfile.DoesNotExist, ValueError, TypeError):
+            raise NotFound("Super Admin user profile not found.")

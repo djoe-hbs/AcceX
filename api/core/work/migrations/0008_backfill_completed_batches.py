@@ -22,7 +22,7 @@ def backfill_completed_batches(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("core_work", "0007_alter_workbatch_status"),
+        ("core_work", "0007_merge_status_and_invoice"),
     ]
 
     operations = [

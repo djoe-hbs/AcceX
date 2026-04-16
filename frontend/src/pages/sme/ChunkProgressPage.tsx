@@ -26,10 +26,10 @@ export default function ChunkProgressPage() {
   })
 
   const reassignMutation = useMutation({
-    mutationFn: () =>
-      chunksApi.reassignProduction(selectedUnit.chunk_id, {
-        new_production_user_id: newProductionUserId,
-        reason,
+    mutationFn: ({ chunkId, userId, reassignReason }: { chunkId: string; userId: string; reassignReason: string }) =>
+      chunksApi.reassignProduction(chunkId, {
+        new_production_user_id: userId,
+        reason: reassignReason,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chunk-progress', id] })
@@ -123,7 +123,7 @@ export default function ChunkProgressPage() {
             <button className="btn-secondary" onClick={() => setSelectedUnit(null)}>Cancel</button>
             <button
               className="btn-primary"
-              onClick={() => reassignMutation.mutate()}
+              onClick={() => selectedUnit && reassignMutation.mutate({ chunkId: selectedUnit.chunk_id, userId: newProductionUserId, reassignReason: reason })}
               disabled={!newProductionUserId || reassignMutation.isPending}
             >
               {reassignMutation.isPending ? 'Saving...' : 'Reassign'}

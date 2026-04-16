@@ -41,7 +41,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(res.data)
           localStorage.setItem('auth_user', JSON.stringify(res.data))
         })
-        .catch(() => localStorage.clear())
+        .catch(() => {
+          localStorage.removeItem('access_token')
+          localStorage.removeItem('auth_user')
+        })
         .finally(() => setLoading(false))
     } else {
       setLoading(false)
@@ -51,13 +54,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     const { data } = await authApi.login(email, password)
     localStorage.setItem('access_token', data.access_token)
-    localStorage.setItem('refresh_token', data.refresh_token)
     localStorage.setItem('auth_user', JSON.stringify(data.user))
     setUser(data.user)
   }
 
-  const logout = () => {
-    localStorage.clear()
+  const logout = async () => {
+    try {
+      await authApi.logout()
+    } catch {
+      // Best-effort: cookie cleared server-side; proceed even if call fails
+    }
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('auth_user')
     setUser(null)
     window.location.href = '/login'
   }

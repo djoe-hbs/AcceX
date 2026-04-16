@@ -54,7 +54,7 @@ function mapUser(user: any) {
 }
 
 function mapUnit(unit: any) {
-  const fileType = unit.count_type === 'ROW' ? 'excel' : unit.work_file_path?.split('.').pop()?.toLowerCase()
+  const fileType = unit.count_type === 'ROW' ? 'excel' : (unit.work_file_path?.split('.').pop()?.toLowerCase() ?? 'other')
   return {
     ...unit,
     chunk_id: unit.id,
@@ -83,6 +83,9 @@ function extractListData(payload: any) {
     return payload.results
   }
 
+  if (payload != null) {
+    console.warn('[extractListData] unexpected response shape:', typeof payload, Object.keys(payload ?? {}))
+  }
   return []
 }
 
@@ -192,28 +195,20 @@ api.interceptors.response.use(
         })
       }
 
-      const refreshToken = localStorage.getItem('refresh_token')
-      if (!refreshToken) {
-        localStorage.clear()
-        window.location.href = '/login'
-        return Promise.reject(error)
-      }
-
       originalRequest._retry = true
       isRefreshing = true
 
       try {
-        const { data } = await axios.post('/api/v1/auth/refresh/', { refresh: refreshToken })
+        // Refresh token is sent automatically via httpOnly cookie
+        const { data } = await axios.post('/api/v1/auth/refresh/', {}, { withCredentials: true })
         localStorage.setItem('access_token', data.access)
-        if (data.refresh) {
-          localStorage.setItem('refresh_token', data.refresh)
-        }
         processQueue(null, data.access)
         originalRequest.headers.Authorization = `Bearer ${data.access}`
         return api(originalRequest)
       } catch (refreshError) {
         processQueue(refreshError, null)
-        localStorage.clear()
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('auth_user')
         window.location.href = '/login'
         return Promise.reject(refreshError)
       } finally {
@@ -227,17 +222,18 @@ api.interceptors.response.use(
 
 export const authApi = {
   login: async (email: string, password: string) => {
-    const response = await api.post('/auth/login/', { email, password })
+    // withCredentials ensures the browser stores the httpOnly refresh cookie
+    const response = await api.post('/auth/login/', { email, password }, { withCredentials: true })
     return {
       ...response,
       data: {
         ...response.data,
         access_token: response.data.access,
-        refresh_token: response.data.refresh,
         user: mapUser(response.data.user),
       },
     }
   },
+  logout: () => api.post('/auth/logout/', {}, { withCredentials: true }),
   me: async () => {
     const response = await api.get('/auth/me/')
     return { ...response, data: mapUser(response.data) }
