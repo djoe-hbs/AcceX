@@ -18,3 +18,10 @@ from .work_unit import (
     ManualAssignUnitSerializer,
     ReportIssueSerializer,
 )
+from .work_invoice import (
+    WorkClientInvoiceSerializer,
+    WorkClientInvoiceItemSerializer,
+    GenerateClientInvoiceSerializer,
+    GenerateMonthlyInvoicesSerializer,
+    SendInvoiceEmailSerializer,
+)

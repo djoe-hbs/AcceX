@@ -2,7 +2,11 @@ from django.db.models.signals import pre_save, post_save
 from django.dispatch import receiver
 
 from core.work.models import WorkBatch, WorkUnit
-from core.work.services import auto_refill_for_production_user, scan_batch_overdue_units
+from core.work.services import (
+    auto_refill_for_production_user,
+    scan_batch_overdue_units,
+    calculate_or_update_file_billing,
+)
 
 
 @receiver(pre_save, sender=WorkUnit)
@@ -45,6 +49,12 @@ def work_unit_post_save(sender, instance, created, **kwargs):
         if not has_incomplete and batch.status != WorkBatch.Status.COMPLETED:
             batch.status = WorkBatch.Status.COMPLETED
             batch.save(update_fields=["status", "updated"])
+
+    if not created and previous_status != instance.status and instance.status == WorkUnit.Status.COMPLETED:
+        calculate_or_update_file_billing(
+            work_file=instance.work_file,
+            completed_at=instance.validation_completed_at,
+        )
 
     # Opportunistic overdue scan so SME gets alert entries without manual trigger.
     scan_batch_overdue_units(instance.batch)
