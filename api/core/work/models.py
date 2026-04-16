@@ -227,6 +227,103 @@ class WorkUnitAlert(models.Model):
     updated = models.DateTimeField(auto_now=True)
 
 
+class WorkFileBilling(models.Model):
+    public_id = models.UUIDField(db_index=True, unique=True, editable=False, default=uuid.uuid4)
+
+    batch = models.ForeignKey(WorkBatch, on_delete=models.CASCADE, related_name="file_billings")
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name="work_file_billings")
+    work_file = models.OneToOneField(WorkFile, on_delete=models.CASCADE, related_name="billing")
+
+    document_type = models.CharField(max_length=20, blank=True, null=True)
+    pricing_mode = models.CharField(max_length=20, blank=True, null=True)
+    quantity = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    unit_cost = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    billing_note = models.TextField(blank=True, null=True)
+
+    completed_at = models.DateTimeField(blank=True, null=True)
+
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-completed_at", "-created"]
+
+    def __str__(self):
+        return f"{self.client.name} - {self.work_file.relative_path} - {self.amount}"
+
+
+class WorkClientInvoice(models.Model):
+    class Trigger(models.TextChoices):
+        AUTO = "AUTO"
+        MANUAL = "MANUAL"
+
+    class Status(models.TextChoices):
+        GENERATED = "GENERATED"
+        SENT = "SENT"
+
+    public_id = models.UUIDField(db_index=True, unique=True, editable=False, default=uuid.uuid4)
+
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name="work_invoices")
+    year = models.PositiveIntegerField(db_index=True)
+    month = models.PositiveIntegerField(db_index=True)
+
+    period_start = models.DateField()
+    period_end = models.DateField()
+
+    trigger = models.CharField(max_length=10, choices=Trigger.choices, db_index=True)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.GENERATED, db_index=True)
+
+    total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+
+    generated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="generated_work_invoices",
+    )
+    sent_at = models.DateTimeField(blank=True, null=True)
+
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["client", "year", "month"], name="unique_client_invoice_per_month"),
+        ]
+        ordering = ["-year", "-month", "-created"]
+
+    def __str__(self):
+        return f"Invoice {self.client.name} {self.year}-{self.month:02d}"
+
+
+class WorkClientInvoiceItem(models.Model):
+    public_id = models.UUIDField(db_index=True, unique=True, editable=False, default=uuid.uuid4)
+
+    invoice = models.ForeignKey(WorkClientInvoice, on_delete=models.CASCADE, related_name="items")
+    batch = models.ForeignKey(WorkBatch, on_delete=models.SET_NULL, null=True, blank=True, related_name="invoice_items")
+    work_file = models.ForeignKey(WorkFile, on_delete=models.SET_NULL, null=True, blank=True, related_name="invoice_items")
+    work_file_billing = models.ForeignKey(
+        WorkFileBilling,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="invoice_items",
+    )
+
+    description = models.TextField()
+    quantity = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    unit_cost = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["batch__name", "work_file__relative_path", "id"]
+
+
 class WorkDeliveryPackage(models.Model):
     class Mode(models.TextChoices):
         COMPLETED_ONLY = "COMPLETED_ONLY"

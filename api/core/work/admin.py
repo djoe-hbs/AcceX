@@ -9,6 +9,9 @@ from core.work.models import (
     WorkUnitAlert,
     WorkDeliveryPackage,
     WorkClientReview,
+    WorkFileBilling,
+    WorkClientInvoice,
+    WorkClientInvoiceItem,
 )
 
 
@@ -69,3 +72,24 @@ class WorkClientReviewAdmin(admin.ModelAdmin):
     list_display = ("batch", "uploaded_by", "assigned_to_sme", "created")
     search_fields = ("batch__name", "uploaded_by__email", "assigned_to_sme__email")
     list_filter = ("created",)
+
+
+@admin.register(WorkFileBilling)
+class WorkFileBillingAdmin(admin.ModelAdmin):
+    list_display = ("client", "batch", "work_file", "pricing_mode", "quantity", "unit_cost", "amount", "completed_at")
+    search_fields = ("client__name", "batch__name", "work_file__relative_path")
+    list_filter = ("document_type", "pricing_mode", "completed_at")
+
+
+@admin.register(WorkClientInvoice)
+class WorkClientInvoiceAdmin(admin.ModelAdmin):
+    list_display = ("client", "year", "month", "trigger", "status", "total_amount", "generated_by", "sent_at")
+    search_fields = ("client__name", "generated_by__email")
+    list_filter = ("trigger", "status", "year", "month")
+
+
+@admin.register(WorkClientInvoiceItem)
+class WorkClientInvoiceItemAdmin(admin.ModelAdmin):
+    list_display = ("invoice", "batch", "work_file", "quantity", "unit_cost", "amount")
+    search_fields = ("invoice__client__name", "batch__name", "work_file__relative_path", "description")
+    list_filter = ("invoice__year", "invoice__month")

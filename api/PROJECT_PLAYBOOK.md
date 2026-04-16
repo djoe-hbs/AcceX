@@ -79,6 +79,17 @@ High-level business flow:
   - SME reassign production user
 - Issue and overdue alert models for SME visibility.
 
+- Phase G billing + invoice baseline
+- Per-file billing calculation on file completion using `core.client.ClientCost`.
+- Monthly invoice model + line items for each client and month.
+- Superadmin invoice APIs:
+  - generate by client + month/year
+  - send invoice email
+  - trigger monthly generation for all clients
+- Monthly invoice command added:
+  - `python3 manage.py generate_monthly_client_invoices`
+- SMTP/env configuration added for production email delivery.
+
 ### In Progress / Pending
 - Domain apps for work execution lifecycle (upload, extract, assign, validate, delivery).
 - Invoice generation and monthly mail (25th).
@@ -142,10 +153,10 @@ Use this section as the living task tracker.
 - [x] Batch sign-off endpoint for admin/superadmin
 
 ### Phase G: Billing + Analytics
-- [ ] Cost calculation using client-specific rules
-- [ ] Invoice generation on 25th monthly
-- [ ] Invoice email pipeline
-- [ ] Analytics API for superadmin/admin (with role limits)
+- [x] Cost calculation using client-specific rules
+- [x] Invoice generation on 25th monthly
+- [x] Invoice email pipeline
+- [x] Analytics API for superadmin/admin (with role limits)
 
 ## 4. Coding Structure Rules (Must Follow)
 
