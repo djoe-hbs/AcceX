@@ -15,6 +15,7 @@ import SettingsPage from '@/pages/SettingsPage'
 import ChunkProgressPage from '@/pages/sme/ChunkProgressPage'
 import ReworkHistoryPage from '@/pages/sme/ReworkHistoryPage'
 import AnalyticsPage from '@/pages/analytics/AnalyticsPage'
+import ReportsPage from '@/pages/reports/ReportsPage'
 import { PageLoader } from '@/components/shared'
 
 const queryClient = new QueryClient({
@@ -57,6 +58,7 @@ function AppRoutes() {
       <Route path="/clients" element={<ProtectedRoute roles={['superadmin']}><ClientsPage /></ProtectedRoute>} />
       <Route path="/invoices" element={<ProtectedRoute roles={['superadmin']}><InvoicesPage /></ProtectedRoute>} />
       <Route path="/analytics" element={<ProtectedRoute roles={['superadmin','admin']}><AnalyticsPage /></ProtectedRoute>} />
+      <Route path="/reports" element={<ProtectedRoute roles={['superadmin','admin','production','validation']}><ReportsPage /></ProtectedRoute>} />
       <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
 

@@ -6,7 +6,7 @@ import { notifApi } from '@/api/client'
 import {
   LayoutDashboard, Users, Building2, Briefcase, FileText,
   Bell, LogOut, ChevronLeft, ChevronRight, Settings,
-  ClipboardCheck, Upload, BarChart3
+  ClipboardCheck, Upload, BarChart3, FileBarChart
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
@@ -25,6 +25,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Clients', href: '/clients', icon: Building2, roles: ['superadmin'] },
   { label: 'Users', href: '/users', icon: Users, roles: ['superadmin', 'admin'] },
   { label: 'Analytics', href: '/analytics', icon: BarChart3, roles: ['superadmin', 'admin'] },
+  { label: 'Reports', href: '/reports', icon: FileBarChart, roles: ['superadmin', 'admin', 'production', 'validation'] },
 ]
 
 function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed: (v: boolean) => void }) {

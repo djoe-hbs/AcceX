@@ -85,6 +85,21 @@ function extractListData(payload: any) {
   return []
 }
 
+function toRelativeApiPath(url: string) {
+  if (!url) return url
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    try {
+      const parsed = new URL(url)
+      const prefix = '/api/v1'
+      const pathWithQuery = `${parsed.pathname}${parsed.search}`
+      return pathWithQuery.startsWith(prefix) ? pathWithQuery.slice(prefix.length) : pathWithQuery
+    } catch {
+      return url
+    }
+  }
+  return url
+}
+
 async function fetchAllPages(url: string) {
   let nextUrl: string | null = url
   const items: any[] = []
@@ -93,7 +108,8 @@ async function fetchAllPages(url: string) {
     const response: any = await api.get(nextUrl)
     const pageItems = extractListData(response.data)
     items.push(...pageItems)
-    nextUrl = response.data?.next || null
+    const rawNext = response.data?.next || null
+    nextUrl = rawNext ? toRelativeApiPath(rawNext) : null
   }
 
   return items
@@ -404,6 +420,18 @@ export const analyticsApi = {
         total_clients: 0,
       },
     }
+  },
+  myReport: async () => {
+    const response = await api.get('/analytics/me/')
+    return { data: response.data }
+  },
+  usersReport: async () => {
+    const response = await api.get('/analytics/users/')
+    return { data: response.data }
+  },
+  userReport: async (userId: string) => {
+    const response = await api.get(`/analytics/users/${userId}/`)
+    return { data: response.data }
   },
 }
 
