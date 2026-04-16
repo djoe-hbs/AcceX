@@ -1,3 +1,6 @@
+import tempfile
+import zipfile
+
 from django.core.exceptions import ObjectDoesNotExist
 from pathlib import Path
 from django.http import FileResponse
@@ -164,10 +167,60 @@ class WorkBatchViewSet(viewsets.ModelViewSet):
         updated_batch = mark_batch_signed_off(batch, serializer.validated_data["signed_off"])
         return Response(WorkBatchSerializer(updated_batch).data, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["get"], url_path="download-completed")
+    def download_completed(self, request, pk=None):
+        if not can_manage_work_batches(request.user):
+            raise PermissionDenied("Only superadmin and admin can download completed packages.")
+
+        batch = self.get_object()
+
+        if batch.status != WorkBatch.Status.COMPLETED:
+            return Response(
+                {"detail": "Job is not yet completed. All files must be validated before download."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Collect production outputs from completed units
+        completed_units = WorkUnit.objects.filter(
+            batch=batch,
+            status=WorkUnit.Status.COMPLETED,
+        ).select_related("work_file").exclude(production_output="")
+
+        files_to_zip = []
+        for unit in completed_units:
+            if unit.production_output:
+                output_path = Path(unit.production_output.path)
+                if output_path.exists() and output_path.is_file():
+                    files_to_zip.append((output_path, unit.work_file.relative_path))
+
+        if not files_to_zip:
+            raise NotFound("No completed files available for download.")
+
+        tmp = tempfile.NamedTemporaryFile(
+            prefix=f"completed_{batch.public_id.hex}_",
+            suffix=".zip",
+            delete=False,
+        )
+        tmp_path = Path(tmp.name)
+        tmp.close()
+
+        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for source_path, archive_name in files_to_zip:
+                zf.write(source_path, arcname=archive_name)
+
+        handle = open(tmp_path, "rb")
+        response = FileResponse(
+            handle,
+            as_attachment=True,
+            filename=f"{batch.name}_completed.zip",
+        )
+        response["X-Temp-File"] = str(tmp_path)
+        return response
+
     @action(detail=True, methods=["get"], url_path="members")
     def members(self, request, pk=None):
         batch = self.get_object()
-        queryset = batch.members.select_related("user").order_by("role", "user__email")
+        queryset = batch.members.filter(is_active=True).select_related("user").order_by("role", "user__email")
 
         serializer = WorkBatchMemberSerializer(queryset, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)

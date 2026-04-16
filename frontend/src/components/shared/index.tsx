@@ -30,6 +30,7 @@ const JOB_STATUS_MAP: Record<string, { label: string; variant: BadgeVariant }> =
   processing: { label: 'Processing', variant: 'blue' },
   ready: { label: 'Ready', variant: 'green' },
   failed: { label: 'Failed', variant: 'red' },
+  completed: { label: 'Completed', variant: 'purple' },
 }
 
 const CHUNK_STATUS_MAP: Record<string, { label: string; variant: BadgeVariant }> = {

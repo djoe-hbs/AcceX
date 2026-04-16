@@ -1,7 +1,8 @@
+import math
 from datetime import timedelta
 from itertools import cycle
 
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 
 from core.work.models import (
@@ -136,12 +137,128 @@ def auto_assign_units(
     production_users,
     validation_users,
     assigned_by,
-    batch_size_per_production_user=50,
+    batch_size_per_production_user=None,
     split_threshold=100,
     split_chunk_size=25,
 ):
-    initialize_work_units(batch=batch, split_threshold=split_threshold, split_chunk_size=split_chunk_size)
+    num_users = len(production_users)
 
+    # ── Re-run: units already exist → assign pending ones balanced ──
+    if WorkUnit.objects.filter(batch=batch).exists():
+        return _assign_pending_units_balanced(
+            batch, production_users, validation_users, assigned_by,
+            batch_size_per_production_user,
+        )
+
+    # ── First run: create units split equally across users ──
+    eligible_files = list(
+        batch.files.filter(is_directory=False)
+        .exclude(file_type=WorkFile.FileType.ZIP)
+        .order_by("relative_path")
+    )
+
+    if not eligible_files:
+        return 0
+
+    # Total workload across every file in the batch (recursive folders
+    # are already flattened — every non-directory file is in the table).
+    total_workload = 0
+    for f in eligible_files:
+        if f.count_type != WorkFile.CountType.NONE and f.count and f.count > 0:
+            total_workload += f.count
+        else:
+            total_workload += 1
+
+    fair_share = math.ceil(total_workload / num_users)
+
+    # Optional manual cap for batch-by-batch assignment.
+    if batch_size_per_production_user and batch_size_per_production_user < fair_share:
+        workload_cap = batch_size_per_production_user
+    else:
+        workload_cap = fair_share
+
+    # Persist for auto-refill.
+    batch.auto_batch_size_per_production_user = workload_cap
+    batch.save(update_fields=["auto_batch_size_per_production_user", "updated"])
+
+    validation_cycle = cycle(validation_users)
+    user_idx = 0
+    user_pages = 0
+    total_assigned = 0
+
+    with transaction.atomic():
+        for work_file in eligible_files:
+            file_count = work_file.count or 0
+            is_countable = (
+                work_file.count_type != WorkFile.CountType.NONE
+                and file_count > 0
+            )
+
+            if not is_countable:
+                # ── Non-countable file → single whole-file unit ──
+                unit = WorkUnit.objects.create(
+                    batch=batch,
+                    work_file=work_file,
+                    unit_number=1,
+                    count_type=work_file.count_type,
+                    workload_count=1,
+                )
+                prod = production_users[user_idx]
+                assign_unit(unit, prod, next(validation_cycle), assigned_by)
+                total_assigned += 1
+                user_pages += 1
+
+                if user_pages >= workload_cap and user_idx < num_users - 1:
+                    user_idx += 1
+                    user_pages = 0
+            else:
+                # ── Countable file → split at user boundaries ──
+                remaining = file_count
+                page_cursor = 1
+                unit_num = 1
+
+                while remaining > 0:
+                    # Advance to next user if current one is full.
+                    while user_pages >= workload_cap and user_idx < num_users - 1:
+                        user_idx += 1
+                        user_pages = 0
+
+                    # How many pages this user takes from this file.
+                    if user_idx < num_users - 1:
+                        can_take = workload_cap - user_pages
+                        chunk = min(remaining, can_take)
+                    else:
+                        # Last user absorbs everything left (odd remainder).
+                        chunk = remaining
+
+                    page_end = page_cursor + chunk - 1
+
+                    unit = WorkUnit.objects.create(
+                        batch=batch,
+                        work_file=work_file,
+                        unit_number=unit_num,
+                        range_start=page_cursor,
+                        range_end=page_end,
+                        count_type=work_file.count_type,
+                        workload_count=chunk,
+                    )
+                    prod = production_users[user_idx]
+                    assign_unit(unit, prod, next(validation_cycle), assigned_by)
+                    total_assigned += 1
+
+                    user_pages += chunk
+                    remaining -= chunk
+                    page_cursor = page_end + 1
+                    unit_num += 1
+
+    return total_assigned
+
+
+def _assign_pending_units_balanced(
+    batch, production_users, validation_users, assigned_by,
+    batch_size_per_production_user=None,
+):
+    """Re-run: assign already-created pending units with workload balancing."""
     pending_units = list(
         WorkUnit.objects.filter(batch=batch, status=WorkUnit.Status.PENDING)
         .select_related("work_file")
@@ -151,26 +268,38 @@ def auto_assign_units(
     if not pending_units:
         return 0
 
-    validation_cycle = cycle(validation_users)
+    num_users = len(production_users)
+    total_pending = sum(u.workload_count for u in pending_units)
+    fair_share = math.ceil(total_pending / num_users)
 
+    if batch_size_per_production_user and batch_size_per_production_user < fair_share:
+        workload_cap = batch_size_per_production_user
+    else:
+        workload_cap = fair_share
+
+    validation_cycle = cycle(validation_users)
+    workloads = {user.pk: 0 for user in production_users}
+    user_by_pk = {user.pk: user for user in production_users}
+    exhausted = set()
     total_assigned = 0
 
     with transaction.atomic():
-        queue_index = 0
-        for production_user in production_users:
-            assigned_count_for_user = 0
-            while queue_index < len(pending_units) and assigned_count_for_user < batch_size_per_production_user:
-                unit = pending_units[queue_index]
-                queue_index += 1
-
-                validator = next(validation_cycle)
-                assign_unit(unit, production_user, validator, assigned_by)
-
-                total_assigned += 1
-                assigned_count_for_user += 1
-
-            if queue_index >= len(pending_units):
+        for unit in pending_units:
+            if len(exhausted) >= num_users:
                 break
+
+            best_pk = min(
+                (pk for pk in workloads if pk not in exhausted),
+                key=lambda pk: workloads[pk],
+            )
+            prod = user_by_pk[best_pk]
+            assign_unit(unit, prod, next(validation_cycle), assigned_by)
+
+            total_assigned += 1
+            workloads[best_pk] += unit.workload_count
+
+            if workloads[best_pk] >= workload_cap:
+                exhausted.add(best_pk)
 
     return total_assigned
 
@@ -197,28 +326,31 @@ def auto_refill_for_production_user(batch: WorkBatch, production_user, assigned_
     if not active_validation_members:
         return 0
 
-    active_assigned_count = WorkUnit.objects.filter(
+    active_workload = WorkUnit.objects.filter(
         batch=batch,
         current_production_assignee=production_user,
         status__in=[WorkUnit.Status.ASSIGNED_TO_PRODUCTION, WorkUnit.Status.REDO],
-    ).count()
+    ).aggregate(total=models.Sum("workload_count"))["total"] or 0
 
-    refill_size = max(batch.auto_batch_size_per_production_user - active_assigned_count, 0)
-    if refill_size == 0:
+    remaining_capacity = max(batch.auto_batch_size_per_production_user - active_workload, 0)
+    if remaining_capacity == 0:
         return 0
 
     pending_units = list(
         WorkUnit.objects.filter(batch=batch, status=WorkUnit.Status.PENDING)
-        .order_by("work_file__relative_path", "unit_number")[:refill_size]
+        .order_by("work_file__relative_path", "unit_number")
     )
     if not pending_units:
         return 0
 
     validation_cycle = cycle([member.user for member in active_validation_members])
     assigned_count = 0
+    filled_workload = 0
 
     with transaction.atomic():
         for unit in pending_units:
+            if filled_workload + unit.workload_count > remaining_capacity and assigned_count > 0:
+                break
             validator = next(validation_cycle)
             assign_unit(
                 unit=unit,
@@ -228,6 +360,7 @@ def auto_refill_for_production_user(batch: WorkBatch, production_user, assigned_
                 reason="Auto refill after production completion.",
             )
             assigned_count += 1
+            filled_workload += unit.workload_count
 
     return assigned_count
 
@@ -245,6 +378,15 @@ def complete_validation(unit: WorkUnit, feedback=""):
     unit.validation_completed_at = timezone.now()
     unit.validator_feedback = feedback or None
     unit.save(update_fields=["status", "validation_completed_at", "validator_feedback", "updated"])
+
+    # Check if all units in the batch are now completed — if so, mark batch COMPLETED.
+    batch = unit.batch
+    has_incomplete = WorkUnit.objects.filter(batch=batch).exclude(
+        status=WorkUnit.Status.COMPLETED
+    ).exists()
+    if not has_incomplete and batch.status != WorkBatch.Status.COMPLETED:
+        batch.status = WorkBatch.Status.COMPLETED
+        batch.save(update_fields=["status", "updated"])
 
 
 def send_back_for_redo(unit: WorkUnit, reason: str, assigned_by):

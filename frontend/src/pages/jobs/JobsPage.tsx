@@ -13,7 +13,7 @@ import {
 } from '@/components/shared'
 import { FileTreeViewer } from '@/components/shared/FileTree'
 import { useAuth } from '@/store/auth'
-import { ChevronRight, Plus, Trash2, Upload, UserCheck, Users } from 'lucide-react'
+import { ChevronRight, Download, Plus, Trash2, Upload, UserCheck, Users } from 'lucide-react'
 
 export function JobsListPage() {
   const { isRole } = useAuth()
@@ -54,9 +54,23 @@ export function JobsListPage() {
               <td className="table-td text-gray-600">{job.total_directories || 0}</td>
               <td className="table-td"><JobStatusBadge status={job.status} /></td>
               <td className="table-td">
-                <Link to={`/jobs/${job.id}`} className="text-blue-600 hover:text-blue-800 text-sm font-medium">
-                  View
-                </Link>
+                <div className="flex items-center gap-2">
+                  <Link to={`/jobs/${job.id}`} className="text-blue-600 hover:text-blue-800 text-sm font-medium">
+                    View
+                  </Link>
+                  {job.status === 'completed' && isRole('superadmin', 'admin') && (
+                    <button
+                      className="text-purple-600 hover:text-purple-800 text-sm font-medium flex items-center gap-1"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        jobsApi.downloadCompleted(job.id)
+                      }}
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Download
+                    </button>
+                  )}
+                </div>
               </td>
             </tr>
           ))}
@@ -151,6 +165,7 @@ function CreateJobModal({ onClose }: { onClose: () => void }) {
 export function JobDetailPage() {
   const { id } = useParams()
   const { isRole } = useAuth()
+  const [downloading, setDownloading] = useState(false)
 
   const { data: jobData, isLoading: jobLoading } = useQuery({
     queryKey: ['job', id],
@@ -185,6 +200,20 @@ export function JobDetailPage() {
   const members = membersData?.data || []
   const units = unitsData?.data || []
 
+  const showAutoAssign = units.length === 0 || units.some((u: any) => u.status === 'pending')
+
+  const handleDownloadCompleted = async () => {
+    if (!id) return
+    setDownloading(true)
+    try {
+      await jobsApi.downloadCompleted(id)
+    } catch {
+      // download helper handles errors silently
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2 text-sm text-gray-500">
@@ -200,7 +229,19 @@ export function JobDetailPage() {
             {job?.client_name || 'No client'} • {job?.total_files || 0} files • {job?.total_directories || 0} folders
           </p>
         </div>
-        <JobStatusBadge status={job?.status || ''} />
+        <div className="flex items-center gap-3">
+          <JobStatusBadge status={job?.status || ''} />
+          {job?.status === 'completed' && isRole('superadmin', 'admin') && (
+            <button
+              className="btn-primary"
+              onClick={handleDownloadCompleted}
+              disabled={downloading}
+            >
+              <Download className="w-4 h-4" />
+              {downloading ? 'Downloading...' : 'Download Completed Files'}
+            </button>
+          )}
+        </div>
       </div>
 
       {job?.error_message && <Alert type="error" message={job.error_message} />}
@@ -218,7 +259,7 @@ export function JobDetailPage() {
           <div className="card">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-semibold text-gray-900">Batch Members</h2>
-              {isRole('sme') && id && <ManageMembers batchId={id} />}
+              {isRole('sme') && id && <ManageMembers batchId={id} existingMembers={members} />}
             </div>
             <div className="space-y-3">
               {members.map((member: any) => (
@@ -238,19 +279,8 @@ export function JobDetailPage() {
               <h2 className="font-semibold text-gray-900">Assigned Files</h2>
               <Badge variant="purple">{units.length}</Badge>
             </div>
-            <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
-              {units.map((unit: any) => (
-                <UnitRow
-                  key={unit.chunk_id}
-                  unit={unit}
-                  members={members}
-                  batchId={id || ''}
-                  canManage={Boolean(isRole('sme') && id)}
-                />
-              ))}
-              {units.length === 0 && <EmptyState title="No assigned files yet" description="Files appear here after auto-assignment is run." />}
-            </div>
-            {isRole('sme') && id && <AutoAssignPanel batchId={id} />}
+            <AssignedFilesView units={units} members={members} batchId={id || ''} canManage={Boolean(isRole('sme') && id)} />
+            {isRole('sme') && id && showAutoAssign && <AutoAssignPanel batchId={id} />}
           </div>
         </div>
       </div>
@@ -262,7 +292,7 @@ function ChunkStatusPill({ status }: { status: string }) {
   return <Badge variant={status === 'completed' ? 'green' : status === 'in_validation' ? 'yellow' : 'blue'}>{status.replace('_', ' ')}</Badge>
 }
 
-function ManageMembers({ batchId }: { batchId: string }) {
+function ManageMembers({ batchId, existingMembers }: { batchId: string; existingMembers: any[] }) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [selectedUserId, setSelectedUserId] = useState('')
@@ -275,10 +305,12 @@ function ManageMembers({ batchId }: { batchId: string }) {
   })
 
   const users = useMemo(() => {
-    return (usersData?.data || []).filter((user: any) =>
-      selectedRole === 'PRODUCTION' ? user.role === 'production' : user.role === 'validation'
-    )
-  }, [selectedRole, usersData?.data])
+    return (usersData?.data || []).filter((user: any) => {
+      const matchRole = selectedRole === 'PRODUCTION' ? user.role === 'production' : user.role === 'validation'
+      const isExisting = existingMembers.some((m: any) => m.user_id === user.id && m.role === selectedRole)
+      return matchRole && !isExisting
+    })
+  }, [selectedRole, usersData?.data, existingMembers])
 
   const addMutation = useMutation({
     mutationFn: () => jobsApi.addMember(batchId, { user_id: selectedUserId, role: selectedRole }),
@@ -331,15 +363,30 @@ function AutoAssignPanel({ batchId }: { batchId: string }) {
   const queryClient = useQueryClient()
   const [productionIds, setProductionIds] = useState<string[]>([])
   const [validationIds, setValidationIds] = useState<string[]>([])
+  const [splitThreshold, setSplitThreshold] = useState(100)
+  const [splitChunkSize, setSplitChunkSize] = useState(25)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [manualCap, setManualCap] = useState<number | null>(null)
   const [error, setError] = useState('')
 
-  const { data: usersData } = useQuery({
-    queryKey: ['assignment-users', 'available'],
-    queryFn: () => usersApi.list({ available: true }),
+  const { data: membersData } = useQuery({
+    queryKey: ['job-members', batchId],
+    queryFn: () => jobsApi.members(batchId),
   })
 
-  const productionUsers = (usersData?.data || []).filter((user: any) => user.role === 'production')
-  const validationUsers = (usersData?.data || []).filter((user: any) => user.role === 'validation')
+  const { data: unitsData } = useQuery({
+    queryKey: ['job-units', batchId],
+    queryFn: () => chunksApi.byBatch(batchId),
+  })
+
+  const productionUsers = (membersData?.data || []).filter((m: any) => m.role === 'PRODUCTION' && m.is_active).map((m: any) => ({ id: m.user_id, name: m.user_name }))
+  const validationUsers = (membersData?.data || []).filter((m: any) => m.role === 'VALIDATION' && m.is_active).map((m: any) => ({ id: m.user_id, name: m.user_name }))
+
+  const allUnits = unitsData?.data || []
+  const pendingCount = allUnits.filter((u: any) => u.status === 'pending').length
+  const totalPages = allUnits.reduce((sum: number, u: any) => sum + (u.unit_count || 1), 0)
+  const pendingPages = allUnits.filter((u: any) => u.status === 'pending').reduce((sum: number, u: any) => sum + (u.unit_count || 1), 0)
+  const pagesPerUser = productionIds.length > 0 ? Math.ceil(pendingPages / productionIds.length) : 0
 
   const autoAssignMutation = useMutation({
     mutationFn: () =>
@@ -347,11 +394,13 @@ function AutoAssignPanel({ batchId }: { batchId: string }) {
         batch_id: batchId,
         production_user_ids: productionIds,
         validation_user_ids: validationIds,
+        batch_size_per_production_user: manualCap || undefined,
+        split_threshold: splitThreshold,
+        split_chunk_size: splitChunkSize,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
-      queryClient.invalidateQueries({ queryKey: ['assignment-users', 'available'] })
-      queryClient.invalidateQueries({ queryKey: ['assignable-users', 'available'] })
+      queryClient.invalidateQueries({ queryKey: ['job-members', batchId] })
       setError('')
     },
     onError: (err: any) => setError(err.response?.data?.detail || 'Auto-assignment failed.'),
@@ -364,8 +413,27 @@ function AutoAssignPanel({ batchId }: { batchId: string }) {
   return (
     <div className="mt-4 border-t border-gray-100 pt-4">
       <h3 className="font-medium text-gray-900">Auto Assign</h3>
-      <p className="text-xs text-gray-500 mt-1">Select active production and validation users, then create units for this batch.</p>
+      <p className="text-xs text-gray-500 mt-1">Select production and validation users. Pages are distributed equally across selected users.</p>
       {error && <Alert type="error" message={error} />}
+
+      {(totalPages > 0 || pendingCount > 0) && (
+        <div className="mt-3 flex flex-wrap gap-3">
+          <div className="bg-blue-50 rounded-md px-3 py-1.5">
+            <p className="text-[10px] font-medium text-blue-600 uppercase tracking-wide">Total pages</p>
+            <p className="text-sm font-semibold text-blue-900">{totalPages}</p>
+          </div>
+          <div className="bg-amber-50 rounded-md px-3 py-1.5">
+            <p className="text-[10px] font-medium text-amber-600 uppercase tracking-wide">Pending pages</p>
+            <p className="text-sm font-semibold text-amber-900">{pendingPages}</p>
+          </div>
+          {productionIds.length > 0 && (
+            <div className="bg-green-50 rounded-md px-3 py-1.5">
+              <p className="text-[10px] font-medium text-green-600 uppercase tracking-wide">Per user</p>
+              <p className="text-sm font-semibold text-green-900">~{pagesPerUser} pages</p>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
@@ -392,6 +460,39 @@ function AutoAssignPanel({ batchId }: { batchId: string }) {
         </div>
       </div>
 
+      <div className="mt-3">
+        <button type="button" className="text-xs text-gray-500 hover:text-gray-700" onClick={() => setShowAdvanced(!showAdvanced)}>
+          {showAdvanced ? 'Hide' : 'Show'} advanced settings
+        </button>
+      </div>
+
+      {showAdvanced && (
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50 rounded-md p-3">
+          <div>
+            <label className="text-xs font-medium text-gray-600">Max pages per user (override)</label>
+            <input
+              type="number"
+              className="input mt-1"
+              min={1}
+              value={manualCap ?? ''}
+              placeholder="Auto"
+              onChange={(e) => setManualCap(e.target.value ? Math.max(1, Number(e.target.value)) : null)}
+            />
+            <p className="text-[11px] text-gray-400 mt-0.5">Leave blank to distribute equally</p>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-600">Split threshold</label>
+            <input type="number" className="input mt-1" min={1} value={splitThreshold} onChange={(e) => setSplitThreshold(Math.max(1, Number(e.target.value)))} />
+            <p className="text-[11px] text-gray-400 mt-0.5">Files above this page/row count get split</p>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-600">Chunk size</label>
+            <input type="number" className="input mt-1" min={1} value={splitChunkSize} onChange={(e) => setSplitChunkSize(Math.max(1, Number(e.target.value)))} />
+            <p className="text-[11px] text-gray-400 mt-0.5">Pages/rows per chunk when splitting</p>
+          </div>
+        </div>
+      )}
+
       <div className="mt-4">
         <button
           className="btn-primary"
@@ -408,6 +509,7 @@ function AutoAssignPanel({ batchId }: { batchId: string }) {
 function MemberRow({ member, batchId, canManage }: { member: any; batchId: string; canManage: boolean }) {
   const queryClient = useQueryClient()
   const [error, setError] = useState('')
+  const [showConfirm, setShowConfirm] = useState(false)
 
   const removeMutation = useMutation({
     mutationFn: () =>
@@ -417,6 +519,7 @@ function MemberRow({ member, batchId, canManage }: { member: any; batchId: strin
       queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
       queryClient.invalidateQueries({ queryKey: ['assignment-users', 'available'] })
       queryClient.invalidateQueries({ queryKey: ['assignable-users', 'available'] })
+      setShowConfirm(false)
     },
     onError: (err: any) => setError(err.response?.data?.detail || 'Unable to remove member.'),
   })
@@ -436,11 +539,7 @@ function MemberRow({ member, batchId, canManage }: { member: any; batchId: strin
               className="btn-secondary py-1 px-2 text-xs"
               title="Remove member (their active units will be returned to pending)"
               disabled={removeMutation.isPending}
-              onClick={() => {
-                if (window.confirm(`Remove ${member.user_name} from this job? Their active units will be returned to pending.`)) {
-                  removeMutation.mutate()
-                }
-              }}
+              onClick={() => setShowConfirm(true)}
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -448,6 +547,110 @@ function MemberRow({ member, batchId, canManage }: { member: any; batchId: strin
         </div>
       </div>
       {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+
+      {showConfirm && (
+        <Modal open={showConfirm} onClose={() => setShowConfirm(false)} title="Remove Member" size="sm">
+          <div className="space-y-4">
+            <p className="text-sm text-gray-700">
+              Are you sure you want to remove <strong>{member.user_name}</strong> from this job? Their active units will be returned to pending.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button 
+                className="btn-secondary" 
+                onClick={() => setShowConfirm(false)} 
+                disabled={removeMutation.isPending}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-primary !bg-red-600 !border-red-600 hover:!bg-red-700"
+                onClick={() => removeMutation.mutate()}
+                disabled={removeMutation.isPending}
+              >
+                {removeMutation.isPending ? 'Removing...' : 'Remove'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+function AssignedFilesView({ units, members, batchId, canManage }: { units: any[]; members: any[]; batchId: string; canManage: boolean }) {
+  const pendingUnits = units.filter((u: any) => u.status === 'pending')
+  const assignedUnits = units.filter((u: any) => u.status !== 'pending')
+
+  // Group assigned units by production user
+  const userGroups = useMemo(() => {
+    const groups: Record<string, { user: any; units: any[]; totalPages: number }> = {}
+    for (const unit of assignedUnits) {
+      const uid = unit.production_user_id || 'unassigned'
+      if (!groups[uid]) {
+        const member = members.find((m: any) => m.user_id === uid)
+        groups[uid] = { user: member || { user_name: 'Unassigned', user_id: uid }, units: [], totalPages: 0 }
+      }
+      groups[uid].units.push(unit)
+      groups[uid].totalPages += unit.unit_count || 1
+    }
+    return Object.values(groups).sort((a, b) => b.totalPages - a.totalPages)
+  }, [assignedUnits, members])
+
+  if (units.length === 0) {
+    return <EmptyState title="No assigned files yet" description="Files appear here after auto-assignment is run." />
+  }
+
+  return (
+    <div className="space-y-4 max-h-[600px] overflow-y-auto pr-1">
+      {userGroups.map((group) => (
+        <div key={group.user.user_id} className="rounded-lg border border-gray-200">
+          <div className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded-t-lg">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-gray-900">{group.user.user_name}</span>
+              <Badge variant="blue">{group.units.length} {group.units.length === 1 ? 'file' : 'files'}</Badge>
+            </div>
+            <span className="text-xs font-medium text-gray-600 bg-white px-2 py-0.5 rounded-md border border-gray-200">
+              {group.totalPages} {group.totalPages === 1 ? 'page' : 'pages'}
+            </span>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {group.units.map((unit: any) => (
+              <UnitRow
+                key={unit.chunk_id}
+                unit={unit}
+                members={members}
+                batchId={batchId}
+                canManage={canManage}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {pendingUnits.length > 0 && (
+        <div className="rounded-lg border border-dashed border-gray-300">
+          <div className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded-t-lg">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-gray-500">Pending</span>
+              <Badge variant="purple">{pendingUnits.length} {pendingUnits.length === 1 ? 'file' : 'files'}</Badge>
+            </div>
+            <span className="text-xs font-medium text-gray-500 bg-white px-2 py-0.5 rounded-md border border-gray-200">
+              {pendingUnits.reduce((sum: number, u: any) => sum + (u.unit_count || 1), 0)} pages
+            </span>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {pendingUnits.map((unit: any) => (
+              <UnitRow
+                key={unit.chunk_id}
+                unit={unit}
+                members={members}
+                batchId={batchId}
+                canManage={canManage}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -467,16 +670,21 @@ function UnitRow({
   const prodMember = members.find((m: any) => m.user_id === unit.production_user_id)
   const isPending = unit.status === 'pending'
 
+  const collaborators = unit.collaborators || []
+  const isSharedFile = collaborators.length > 1
+
   return (
     <div className="rounded-lg border border-gray-100 p-3">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-gray-900">{unit.file_name}</p>
           <p className="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
-            <span>{unit.unit_start || unit.unit_end ? `${unit.unit_start || '?'} - ${unit.unit_end || '?'}` : 'Whole file'}</span>
-            {prodMember && (
-              <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-md text-[10px] font-medium uppercase tracking-wide">
-                {prodMember.user_name}
+            <span>{unit.unit_start || unit.unit_end ? `Pages ${unit.unit_start || '?'} - ${unit.unit_end || '?'}` : 'Whole file'}</span>
+            <span className="text-gray-400">({unit.unit_count || 1} {(unit.unit_count || 1) === 1 ? 'page' : 'pages'})</span>
+            {isSharedFile && (
+              <span className="bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-md text-[10px] font-medium uppercase tracking-wide flex items-center gap-1">
+                <Users className="w-3 h-3" />
+                Team file
               </span>
             )}
           </p>
@@ -496,6 +704,28 @@ function UnitRow({
           )}
         </div>
       </div>
+      {isSharedFile && (
+        <div className="mt-2 bg-gray-50 rounded-md p-2">
+          <p className="text-[11px] font-medium text-gray-600 mb-1">Collaborators on this file</p>
+          <div className="flex flex-wrap gap-1.5">
+            {collaborators.map((c: any) => (
+              <span
+                key={c.id}
+                className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium ${
+                  c.id === unit.production_user_id
+                    ? 'bg-blue-100 text-blue-800'
+                    : 'bg-gray-200 text-gray-700'
+                }`}
+              >
+                {c.name}
+                {c.chunks?.length > 0 && (
+                  <span className="text-[9px] ml-1 opacity-70">({c.chunks.join(', ')})</span>
+                )}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
       {assignOpen && (
         <ManualAssignModal
           unit={unit}

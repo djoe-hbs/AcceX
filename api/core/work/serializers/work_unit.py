@@ -26,22 +26,32 @@ class WorkUnitSerializer(serializers.ModelSerializer):
         ]
 
     def get_collaborators(self, obj):
-        queryset = WorkUnit.objects.filter(
-            work_file=obj.work_file,
-            status__in=[
-                WorkUnit.Status.ASSIGNED_TO_PRODUCTION,
-                WorkUnit.Status.REDO,
-                WorkUnit.Status.IN_VALIDATION,
-            ],
-        ).exclude(current_production_assignee=None)
+        queryset = (
+            WorkUnit.objects.filter(
+                work_file=obj.work_file,
+                status__in=[
+                    WorkUnit.Status.ASSIGNED_TO_PRODUCTION,
+                    WorkUnit.Status.REDO,
+                    WorkUnit.Status.IN_VALIDATION,
+                ],
+            )
+            .exclude(current_production_assignee=None)
+            .select_related("current_production_assignee")
+            .order_by("unit_number")
+        )
 
-        collaborator_ids = {
-            unit.current_production_assignee.public_id.hex
-            for unit in queryset
-            if unit.current_production_assignee
-        }
+        user_map = {}
+        for unit in queryset:
+            user = unit.current_production_assignee
+            if not user:
+                continue
+            uid = user.public_id.hex
+            if uid not in user_map:
+                user_map[uid] = {"id": uid, "name": user.name, "chunks": []}
+            if unit.range_start:
+                user_map[uid]["chunks"].append(f"{unit.range_start}-{unit.range_end}")
 
-        return sorted(collaborator_ids)
+        return list(user_map.values())
 
 
 class WorkBatchMemberSerializer(serializers.ModelSerializer):
@@ -87,7 +97,7 @@ class AutoAssignSerializer(serializers.Serializer):
     production_user_ids = serializers.ListField(child=serializers.UUIDField(), required=False, allow_empty=False)
     validation_user_ids = serializers.ListField(child=serializers.UUIDField(), required=False, allow_empty=False)
 
-    batch_size_per_production_user = serializers.IntegerField(required=False, default=50, min_value=1)
+    batch_size_per_production_user = serializers.IntegerField(required=False, default=None, min_value=1, allow_null=True)
     split_threshold = serializers.IntegerField(required=False, default=100, min_value=1)
     split_chunk_size = serializers.IntegerField(required=False, default=25, min_value=1)
 

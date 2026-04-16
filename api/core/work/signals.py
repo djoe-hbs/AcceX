@@ -1,7 +1,7 @@
 from django.db.models.signals import pre_save, post_save
 from django.dispatch import receiver
 
-from core.work.models import WorkUnit
+from core.work.models import WorkBatch, WorkUnit
 from core.work.services import auto_refill_for_production_user, scan_batch_overdue_units
 
 
@@ -29,6 +29,22 @@ def work_unit_post_save(sender, instance, created, **kwargs):
             production_user=instance.current_production_assignee,
             assigned_by=instance.assigned_by,
         )
+
+    # When a unit transitions to COMPLETED, check if all units in the batch
+    # are now completed — if so, mark the batch itself as COMPLETED.
+    if (
+        not created
+        and previous_status != instance.status
+        and instance.status == WorkUnit.Status.COMPLETED
+    ):
+        batch = instance.batch
+        # Use a fresh DB query to avoid stale prefetch cache on related manager.
+        has_incomplete = WorkUnit.objects.filter(batch=batch).exclude(
+            status=WorkUnit.Status.COMPLETED
+        ).exists()
+        if not has_incomplete and batch.status != WorkBatch.Status.COMPLETED:
+            batch.status = WorkBatch.Status.COMPLETED
+            batch.save(update_fields=["status", "updated"])
 
     # Opportunistic overdue scan so SME gets alert entries without manual trigger.
     scan_batch_overdue_units(instance.batch)

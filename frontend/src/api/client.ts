@@ -19,6 +19,7 @@ const batchStatusMap: Record<string, string> = {
   PROCESSING: 'processing',
   READY: 'ready',
   FAILED: 'failed',
+  COMPLETED: 'completed',
 }
 
 const unitStatusMap: Record<string, string> = {
@@ -341,6 +342,7 @@ export const jobsApi = {
       split_chunk_size?: number
     }
   ) => api.post('/work/unit/auto-assign/', data),
+  downloadCompleted: (id: string) => downloadUnitFile(`/work/batch/${id}/download-completed/`),
 }
 
 export const chunksApi = {
