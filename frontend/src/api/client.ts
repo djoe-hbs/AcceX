@@ -104,7 +104,7 @@ function toRelativeApiPath(url: string) {
   return url
 }
 
-async function fetchAllPages(url: string) {
+export async function fetchAllPages(url: string) {
   let nextUrl: string | null = url
   const items: any[] = []
 

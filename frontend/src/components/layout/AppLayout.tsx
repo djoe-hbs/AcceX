@@ -22,6 +22,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Validate', href: '/validate', icon: ClipboardCheck, roles: ['validation'] },
   { label: 'Clients', href: '/clients', icon: Building2, roles: ['superadmin'] },
   { label: 'Users', href: '/users', icon: Users, roles: ['superadmin', 'admin'] },
+  { label: 'Invoices', href: '/invoices', icon: FileText, roles: ['superadmin'] },
   { label: 'Analytics', href: '/analytics', icon: BarChart3, roles: ['superadmin', 'admin'] },
   { label: 'Reports', href: '/reports', icon: FileBarChart, roles: ['superadmin', 'admin', 'production', 'validation'] },
 ]
