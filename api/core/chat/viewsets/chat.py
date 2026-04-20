@@ -4,6 +4,7 @@ from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -18,6 +19,14 @@ from core.chat.serializers import (
 )
 
 CHAT_ELIGIBLE_ROLES = {User.Role.SME, User.Role.PRODUCTION_USER, User.Role.VALIDATION_USER}
+
+
+class ThreadPagination(PageNumberPagination):
+    page_size = 15
+
+
+class MessagePagination(PageNumberPagination):
+    page_size = 20
 
 
 class ChatThreadViewSet(viewsets.ViewSet):
@@ -61,10 +70,12 @@ class ChatThreadViewSet(viewsets.ViewSet):
             .order_by("-updated")
         )
 
+        paginator = ThreadPagination()
+        page = paginator.paginate_queryset(threads, request)
         serializer = ChatThreadSerializer(
-            threads, many=True, context={"request": request}
+            page, many=True, context={"request": request}
         )
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        return paginator.get_paginated_response(serializer.data)
 
     def create(self, request):
         self._check_chat_access(request.user)
@@ -95,7 +106,7 @@ class ChatThreadViewSet(viewsets.ViewSet):
             msgs = (
                 thread.messages
                 .select_related("sender")
-                .order_by("created")
+                .order_by("-created")
             )
 
             # Mark unread messages from the other party as read
@@ -103,10 +114,12 @@ class ChatThreadViewSet(viewsets.ViewSet):
                 read_at__isnull=True,
             ).exclude(sender=request.user).update(read_at=timezone.now())
 
+            paginator = MessagePagination()
+            page = paginator.paginate_queryset(msgs, request)
             serializer = ChatMessageSerializer(
-                msgs, many=True, context={"request": request}
+                page, many=True, context={"request": request}
             )
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            return paginator.get_paginated_response(serializer.data)
 
         # POST — send a message
         serializer = SendMessageSerializer(data=request.data)

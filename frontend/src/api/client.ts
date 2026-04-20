@@ -377,6 +377,17 @@ export const chunksApi = {
     const data = await fetchAllPages(`/work/unit/?batch_id=${encodeURIComponent(batchId)}`)
     return { data: data.map(mapUnit) }
   },
+  byBatchPaged: async (batchId: string, page = 1) => {
+    const response = await api.get(`/work/unit/?batch_id=${encodeURIComponent(batchId)}&page=${page}`)
+    const payload = response.data
+    const results = (Array.isArray(payload?.results) ? payload.results : Array.isArray(payload) ? payload : []).map(mapUnit)
+    return {
+      data: results,
+      count: payload?.count ?? results.length,
+      next: payload?.next ?? null,
+      page,
+    }
+  },
   get: async (id: string) => {
     const response = await api.get(`/work/unit/${id}/`)
     return { ...response, data: mapUnit(response.data) }

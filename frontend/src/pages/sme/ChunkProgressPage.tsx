@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { chunksApi, usersApi } from '@/api/client'
@@ -13,12 +13,46 @@ export default function ChunkProgressPage() {
   const [reason, setReason] = useState('')
   const [error, setError] = useState('')
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['chunk-progress', id],
-    queryFn: () => chunksApi.byBatch(id || ''),
+  const [allUnits, setAllUnits] = useState<any[]>([])
+  const loadedPageRef = useRef(1)
+  const [hasMore, setHasMore] = useState(false)
+  const [totalCount, setTotalCount] = useState(0)
+  const [loadingMore, setLoadingMore] = useState(false)
+
+  const { isLoading } = useQuery({
+    queryKey: ['chunk-progress', id, 'page-1'],
+    queryFn: async () => {
+      const pagesToLoad = loadedPageRef.current
+      const allItems: any[] = []
+      let lastRes: any = null
+      for (let p = 1; p <= pagesToLoad; p++) {
+        const res = await chunksApi.byBatchPaged(id || '', p)
+        allItems.push(...res.data)
+        lastRes = res
+        if (!res.next) break
+      }
+      setAllUnits(allItems)
+      setHasMore(Boolean(lastRes?.next))
+      setTotalCount(lastRes?.count ?? 0)
+      return lastRes
+    },
     enabled: Boolean(id),
     refetchInterval: 15000,
   })
+
+  const loadMore = useCallback(async () => {
+    if (!id || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const nextPage = loadedPageRef.current + 1
+      const res = await chunksApi.byBatchPaged(id, nextPage)
+      setAllUnits((prev) => [...prev, ...res.data])
+      setHasMore(Boolean(res.next))
+      loadedPageRef.current = nextPage
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [id, loadingMore])
 
   const { data: usersData } = useQuery({
     queryKey: ['production-users'],
@@ -32,7 +66,7 @@ export default function ChunkProgressPage() {
         reason: reassignReason,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['chunk-progress', id] })
+      queryClient.invalidateQueries({ queryKey: ['chunk-progress', id, 'page-1'] })
       setSelectedUnit(null)
       setNewProductionUserId('')
       setReason('')
@@ -46,7 +80,7 @@ export default function ChunkProgressPage() {
     return <PageLoader />
   }
 
-  const units = data?.data || []
+  const units = allUnits
   const productionUsers = usersData?.data || []
 
   return (
@@ -102,6 +136,18 @@ export default function ChunkProgressPage() {
           )}
         </Table>
       </div>
+
+      {hasMore && (
+        <div className="text-center">
+          <button
+            className="btn-secondary text-sm"
+            onClick={loadMore}
+            disabled={loadingMore}
+          >
+            {loadingMore ? 'Loading...' : `Load More (${units.length} of ${totalCount})`}
+          </button>
+        </div>
+      )}
 
       <Modal open={Boolean(selectedUnit)} onClose={() => setSelectedUnit(null)} title="Reassign Production User" size="sm">
         <div className="space-y-4">

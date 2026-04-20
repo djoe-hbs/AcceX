@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { jobsApi, usersApi, chunksApi, clientsApi } from '@/api/client'
@@ -220,12 +220,47 @@ export function JobDetailPage() {
     refetchInterval: 15000,
   })
 
-  const { data: unitsData, isLoading: unitsLoading } = useQuery({
-    queryKey: ['job-units', id],
-    queryFn: () => chunksApi.byBatch(id || ''),
+  const [unitsPages, setUnitsPages] = useState<any[]>([])
+  const loadedPageRef = useRef(1)
+  const [unitsHasMore, setUnitsHasMore] = useState(false)
+  const [unitsTotalCount, setUnitsTotalCount] = useState(0)
+  const [unitsLoadingMore, setUnitsLoadingMore] = useState(false)
+
+  const { isLoading: unitsLoading } = useQuery({
+    queryKey: ['job-units', id, 'page-1'],
+    queryFn: async () => {
+      // On refetch, reload all pages that were previously loaded
+      const pagesToLoad = loadedPageRef.current
+      const allItems: any[] = []
+      let lastRes: any = null
+      for (let p = 1; p <= pagesToLoad; p++) {
+        const res = await chunksApi.byBatchPaged(id || '', p)
+        allItems.push(...res.data)
+        lastRes = res
+        if (!res.next) break
+      }
+      setUnitsPages(allItems)
+      setUnitsHasMore(Boolean(lastRes?.next))
+      setUnitsTotalCount(lastRes?.count ?? 0)
+      return lastRes
+    },
     enabled: Boolean(id),
     refetchInterval: 15000,
   })
+
+  const loadMoreUnits = useCallback(async () => {
+    if (!id || unitsLoadingMore) return
+    setUnitsLoadingMore(true)
+    try {
+      const nextPage = loadedPageRef.current + 1
+      const res = await chunksApi.byBatchPaged(id, nextPage)
+      setUnitsPages((prev) => [...prev, ...res.data])
+      setUnitsHasMore(Boolean(res.next))
+      loadedPageRef.current = nextPage
+    } finally {
+      setUnitsLoadingMore(false)
+    }
+  }, [id, unitsLoadingMore])
 
   if (jobLoading || filesLoading || membersLoading || unitsLoading) {
     return <PageLoader />
@@ -238,7 +273,7 @@ export function JobDetailPage() {
   const job = jobData?.data
   const files = filesData?.data || []
   const members = membersData?.data || []
-  const units = unitsData?.data || []
+  const units = unitsPages
 
   const showAutoAssign = units.length === 0 || units.some((u: any) => u.status === 'pending')
 
@@ -339,7 +374,16 @@ export function JobDetailPage() {
               <h2 className="font-semibold text-gray-900">Assigned Files</h2>
               <Badge variant="purple">{units.length}</Badge>
             </div>
-            <AssignedFilesView units={units} members={members} batchId={id || ''} canManage={Boolean(isRole('sme') && id)} />
+            <AssignedFilesView
+              units={units}
+              members={members}
+              batchId={id || ''}
+              canManage={Boolean(isRole('sme') && id)}
+              hasMore={unitsHasMore}
+              loadingMore={unitsLoadingMore}
+              onLoadMore={loadMoreUnits}
+              totalCount={unitsTotalCount}
+            />
             {isRole('sme') && id && showAutoAssign && <AutoAssignPanel batchId={id} />}
           </div>
         </div>
@@ -454,17 +498,18 @@ function AutoAssignPanel({ batchId }: { batchId: string }) {
   })
 
   const { data: unitsData } = useQuery({
-    queryKey: ['job-units', batchId],
-    queryFn: () => chunksApi.byBatch(batchId),
+    queryKey: ['job-units', batchId, 'page-1'],
+    queryFn: () => chunksApi.byBatchPaged(batchId, 1),
   })
 
   const productionUsers = (membersData?.data || []).filter((m: any) => m.role === 'PRODUCTION' && m.is_active).map((m: any) => ({ id: m.user_id, name: m.user_name }))
   const validationUsers = (membersData?.data || []).filter((m: any) => m.role === 'VALIDATION' && m.is_active).map((m: any) => ({ id: m.user_id, name: m.user_name }))
 
-  const allUnits = unitsData?.data || []
-  const pendingCount = allUnits.filter((u: any) => u.status === 'pending').length
-  const totalPages = allUnits.reduce((sum: number, u: any) => sum + (u.unit_count || 1), 0)
-  const pendingPages = allUnits.filter((u: any) => u.status === 'pending').reduce((sum: number, u: any) => sum + (u.unit_count || 1), 0)
+  const firstPageUnits = unitsData?.data || []
+  const totalUnitCount = unitsData?.count || 0
+  const pendingCount = firstPageUnits.filter((u: any) => u.status === 'pending').length
+  const totalPages = firstPageUnits.reduce((sum: number, u: any) => sum + (u.unit_count || 1), 0)
+  const pendingPages = firstPageUnits.filter((u: any) => u.status === 'pending').reduce((sum: number, u: any) => sum + (u.unit_count || 1), 0)
   const pagesPerUser = productionIds.length > 0 ? Math.ceil(pendingPages / productionIds.length) : 0
 
   const autoAssignMutation = useMutation({
@@ -475,7 +520,7 @@ function AutoAssignPanel({ batchId }: { batchId: string }) {
         validation_user_ids: validationIds,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
+      queryClient.invalidateQueries({ queryKey: ['job-units', batchId, 'page-1'] })
       queryClient.invalidateQueries({ queryKey: ['job-members', batchId] })
       setError('')
     },
@@ -559,7 +604,7 @@ function MemberRow({ member, batchId, canManage }: { member: any; batchId: strin
       jobsApi.removeMember(batchId, { user_id: member.user_id, role: member.role }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['job-members', batchId] })
-      queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
+      queryClient.invalidateQueries({ queryKey: ['job-units', batchId, 'page-1'] })
       queryClient.invalidateQueries({ queryKey: ['assignable-users', 'available'] })
       setShowConfirm(false)
     },
@@ -619,7 +664,7 @@ function MemberRow({ member, batchId, canManage }: { member: any; batchId: strin
   )
 }
 
-function AssignedFilesView({ units, members, batchId, canManage }: { units: any[]; members: any[]; batchId: string; canManage: boolean }) {
+function AssignedFilesView({ units, members, batchId, canManage, hasMore, loadingMore, onLoadMore, totalCount }: { units: any[]; members: any[]; batchId: string; canManage: boolean; hasMore?: boolean; loadingMore?: boolean; onLoadMore?: () => void; totalCount?: number }) {
   const pendingUnits = units.filter((u: any) => u.status === 'pending')
   const assignedUnits = units.filter((u: any) => u.status !== 'pending')
 
@@ -691,6 +736,18 @@ function AssignedFilesView({ units, members, batchId, canManage }: { units: any[
               />
             ))}
           </div>
+        </div>
+      )}
+
+      {hasMore && (
+        <div className="text-center pt-2">
+          <button
+            className="btn-secondary text-sm"
+            onClick={onLoadMore}
+            disabled={loadingMore}
+          >
+            {loadingMore ? 'Loading...' : `Load More (${units.length} of ${totalCount ?? '?'})`}
+          </button>
         </div>
       )}
     </div>
@@ -778,7 +835,7 @@ function ManualAssignModal({
         reason: 'Manual assignment by SME.',
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
+      queryClient.invalidateQueries({ queryKey: ['job-units', batchId, 'page-1'] })
       queryClient.invalidateQueries({ queryKey: ['assignable-users', 'available'] })
       onClose()
     },

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { jobsApi, chunksApi } from '@/api/client'
@@ -49,18 +49,52 @@ export default function FeedbackPage() {
     refetchInterval: 15000,
   })
 
-  const { data: unitsData, isLoading: unitsLoading } = useQuery({
-    queryKey: ['job-units', id],
-    queryFn: () => chunksApi.byBatch(id || ''),
+  const [unitsPages, setUnitsPages] = useState<any[]>([])
+  const loadedPageRef = useRef(1)
+  const [unitsHasMore, setUnitsHasMore] = useState(false)
+  const [unitsTotalCount, setUnitsTotalCount] = useState(0)
+  const [unitsLoadingMore, setUnitsLoadingMore] = useState(false)
+
+  const { isLoading: unitsLoading } = useQuery({
+    queryKey: ['job-units', id, 'page-1'],
+    queryFn: async () => {
+      const pagesToLoad = loadedPageRef.current
+      const allItems: any[] = []
+      let lastRes: any = null
+      for (let p = 1; p <= pagesToLoad; p++) {
+        const res = await chunksApi.byBatchPaged(id || '', p)
+        allItems.push(...res.data)
+        lastRes = res
+        if (!res.next) break
+      }
+      setUnitsPages(allItems)
+      setUnitsHasMore(Boolean(lastRes?.next))
+      setUnitsTotalCount(lastRes?.count ?? 0)
+      return lastRes
+    },
     enabled: Boolean(id),
     refetchInterval: 15000,
   })
+
+  const loadMoreUnits = useCallback(async () => {
+    if (!id || unitsLoadingMore) return
+    setUnitsLoadingMore(true)
+    try {
+      const nextPage = loadedPageRef.current + 1
+      const res = await chunksApi.byBatchPaged(id, nextPage)
+      setUnitsPages((prev) => [...prev, ...res.data])
+      setUnitsHasMore(Boolean(res.next))
+      loadedPageRef.current = nextPage
+    } finally {
+      setUnitsLoadingMore(false)
+    }
+  }, [id, unitsLoadingMore])
 
   if (jobLoading || reviewsLoading || unitsLoading) return <PageLoader />
 
   const job = jobData?.data
   const reviews = reviewsData?.data || []
-  const units = unitsData?.data || []
+  const units = unitsPages
   const deliveryStatus = job?.delivery_status || 'IN_PROGRESS'
   const statusInfo = DELIVERY_STATUS_MAP[deliveryStatus] || { label: deliveryStatus, variant: 'gray' as const }
 
@@ -108,7 +142,7 @@ export default function FeedbackPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card">
           <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Total Units</p>
-          <p className="text-lg font-semibold text-gray-900 mt-1">{units.length}</p>
+          <p className="text-lg font-semibold text-gray-900 mt-1">{unitsTotalCount}</p>
         </div>
         <div className="card">
           <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">Completed</p>
@@ -224,6 +258,18 @@ export default function FeedbackPage() {
             <strong>{completedUnits.length}</strong> completed unit{completedUnits.length !== 1 ? 's' : ''} available for rework selection.
             The assigned SME will choose which files need rework and assign them to production users.
           </p>
+        </div>
+      )}
+
+      {unitsHasMore && (
+        <div className="text-center">
+          <button
+            className="btn-secondary text-sm"
+            onClick={loadMoreUnits}
+            disabled={unitsLoadingMore}
+          >
+            {unitsLoadingMore ? 'Loading...' : `Load More Units (${units.length} of ${unitsTotalCount})`}
+          </button>
         </div>
       )}
 
