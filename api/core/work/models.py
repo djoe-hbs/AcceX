@@ -173,6 +173,7 @@ class WorkUnit(models.Model):
     validation_completed_at = models.DateTimeField(blank=True, null=True)
 
     redo_reason = models.TextField(blank=True, null=True)
+    redo_report_file = models.FileField(upload_to="work/redo_reports", blank=True, null=True)
 
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)

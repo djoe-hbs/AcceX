@@ -28,6 +28,7 @@ from core.work.serializers import (
     ReassignProductionSerializer,
     ManualAssignUnitSerializer,
     ReportIssueSerializer,
+    BulkClientReworkSerializer,
 )
 from core.work.services import (
     auto_assign_units,
@@ -38,6 +39,7 @@ from core.work.services import (
     assign_unit,
     create_issue_alert,
     create_overdue_alerts,
+    send_units_for_client_rework,
 )
 
 
@@ -217,6 +219,23 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
         handle = open(output_path, "rb")
         return FileResponse(handle, as_attachment=True, filename=output_path.name)
 
+    @action(detail=True, methods=["get"], url_path="download-redo-report")
+    def download_redo_report(self, request, pk=None):
+        unit = self.get_object()
+
+        if not self._can_manage_unit(request.user, unit):
+            raise PermissionDenied("You do not have permission to download this file.")
+
+        if not unit.redo_report_file:
+            raise NotFound("Redo report file is not available.")
+
+        report_path = Path(unit.redo_report_file.path)
+        if not report_path.exists() or not report_path.is_file():
+            raise NotFound("Redo report file is not found.")
+
+        handle = open(report_path, "rb")
+        return FileResponse(handle, as_attachment=True, filename=report_path.name)
+
     @action(detail=True, methods=["post"], url_path="validate")
     def validate_unit(self, request, pk=None):
         unit = self.get_object()
@@ -240,7 +259,8 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
             complete_validation(unit, feedback=reason)
             return Response({"detail": "Unit validated and completed."}, status=status.HTTP_200_OK)
 
-        send_back_for_redo(unit, reason=reason, assigned_by=request.user)
+        report_file = serializer.validated_data.get("report_file")
+        send_back_for_redo(unit, reason=reason, assigned_by=request.user, report_file=report_file)
         return Response({"detail": "Unit sent back for redo."}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="reassign-production")
@@ -283,6 +303,28 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
                 "alert_id": alert.public_id.hex,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=False, methods=["post"], url_path="bulk-client-rework")
+    def bulk_client_rework(self, request):
+        if not is_sme(request.user):
+            raise PermissionDenied("Only SME can send units for client rework.")
+
+        serializer = BulkClientReworkSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        resolved = serializer.validated_data["resolved_assignments"]
+        reason = serializer.validated_data["reason"]
+
+        send_units_for_client_rework(
+            unit_assignments=resolved,
+            assigned_by=request.user,
+            reason=reason,
+        )
+
+        return Response(
+            {"detail": f"{len(resolved)} unit(s) sent for rework.", "count": len(resolved)},
+            status=status.HTTP_200_OK,
         )
 
     @action(detail=False, methods=["get"], url_path="overdue")

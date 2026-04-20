@@ -386,17 +386,28 @@ def complete_validation(unit: WorkUnit, feedback=""):
     ).exists()
     if not has_incomplete and batch.status != WorkBatch.Status.COMPLETED:
         batch.status = WorkBatch.Status.COMPLETED
-        batch.save(update_fields=["status", "updated"])
+        update_fields = ["status", "updated"]
+        if batch.delivery_status == WorkBatch.DeliveryStatus.REWORK_REQUESTED:
+            batch.delivery_status = WorkBatch.DeliveryStatus.CLIENT_REVIEW_PENDING
+            update_fields.append("delivery_status")
+        batch.save(update_fields=update_fields)
 
 
-def send_back_for_redo(unit: WorkUnit, reason: str, assigned_by):
+def send_back_for_redo(unit: WorkUnit, reason: str, assigned_by, report_file=None):
     close_active_assignments(unit, WorkUnitAssignment.Stage.VALIDATION)
 
     unit.status = WorkUnit.Status.REDO
     unit.redo_reason = reason
     unit.validator_feedback = reason
     unit.production_assigned_at = timezone.now()
-    unit.save(update_fields=["status", "redo_reason", "validator_feedback", "production_assigned_at", "updated"])
+
+    update_fields = ["status", "redo_reason", "validator_feedback", "production_assigned_at", "updated"]
+
+    if report_file:
+        unit.redo_report_file = report_file
+        update_fields.append("redo_report_file")
+
+    unit.save(update_fields=update_fields)
 
     WorkUnitAssignment.objects.create(
         unit=unit,

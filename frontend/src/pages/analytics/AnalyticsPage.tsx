@@ -6,16 +6,19 @@ export default function AnalyticsPage() {
   const { data: summaryData, isLoading: summaryLoading } = useQuery({
     queryKey: ['analytics-summary'],
     queryFn: () => analyticsApi.dashboard(),
+    refetchInterval: 15000,
   })
 
   const { data: jobsData, isLoading: jobsLoading } = useQuery({
     queryKey: ['analytics-jobs'],
     queryFn: () => jobsApi.list(),
+    refetchInterval: 15000,
   })
 
   const { data: usersData, isLoading: usersLoading } = useQuery({
     queryKey: ['analytics-users'],
     queryFn: () => usersApi.list(),
+    refetchInterval: 15000,
   })
 
   if (summaryLoading || jobsLoading || usersLoading) {

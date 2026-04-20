@@ -3,7 +3,7 @@ from decimal import Decimal
 from datetime import date
 
 from django.conf import settings
-from django.core.mail import send_mail
+from django.core.mail import EmailMessage
 from django.db import transaction
 from django.utils import timezone
 
@@ -11,6 +11,7 @@ from core.client.models import Client
 from core.user.models import User
 from core.work.models import WorkBatch, WorkClientInvoice, WorkClientInvoiceItem, WorkFileBilling
 from .billing_engine import backfill_batch_file_billings
+from .invoice_pdf import generate_invoice_pdf
 
 
 def get_month_period(year: int, month: int):
@@ -61,20 +62,31 @@ def send_client_invoice_email(invoice: WorkClientInvoice, recipients=None):
     if not getattr(settings, "WORK_INVOICE_EMAIL_ENABLED", True):
         return False
 
-    recipient_list = recipients or get_superadmin_emails()
+    recipient_list = list(recipients) if recipients else get_superadmin_emails()
+    # Always include the admin email
+    admin_email = "vibecoder.hbs@gmail.com"
+    if admin_email not in recipient_list:
+        recipient_list.append(admin_email)
+    # Client email excluded — invoices sent only to superadmin/admin
+    # client_email = getattr(invoice.client, "contact_email", None)
+    # if client_email and client_email not in recipient_list:
+    #     recipient_list.append(client_email)
     if not recipient_list:
         return False
 
     subject = f"AcceX Invoice | {invoice.client.name} | {invoice.year}-{invoice.month:02d}"
     body = _build_invoice_email_body(invoice)
+    pdf_bytes = generate_invoice_pdf(invoice)
+    filename = f"AcceX_Invoice_{invoice.client.name}_{invoice.year}-{invoice.month:02d}.pdf"
 
-    sent_count = send_mail(
+    email = EmailMessage(
         subject=subject,
-        message=body,
+        body=body,
         from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=recipient_list,
-        fail_silently=False,
+        to=recipient_list,
     )
+    email.attach(filename, pdf_bytes, "application/pdf")
+    sent_count = email.send(fail_silently=False)
 
     if sent_count > 0:
         invoice.status = WorkClientInvoice.Status.SENT

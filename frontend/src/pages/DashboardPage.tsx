@@ -22,11 +22,13 @@ function ManagementDashboard() {
   const { data: statsData, isLoading: statsLoading } = useQuery({
     queryKey: ['dashboard-summary'],
     queryFn: () => analyticsApi.dashboard(),
+    refetchInterval: 15000,
   })
 
   const { data: jobsData, isLoading: jobsLoading } = useQuery({
     queryKey: ['dashboard-jobs'],
     queryFn: () => jobsApi.list(),
+    refetchInterval: 15000,
   })
 
   if (statsLoading || jobsLoading) {
@@ -84,6 +86,7 @@ function ProductionDashboard() {
   const { data, isLoading } = useQuery({
     queryKey: ['production-dashboard-tasks'],
     queryFn: () => chunksApi.myTasks(),
+    refetchInterval: 15000,
   })
 
   if (isLoading) {
@@ -136,6 +139,7 @@ function ValidationDashboard() {
   const { data, isLoading } = useQuery({
     queryKey: ['validation-dashboard-tasks'],
     queryFn: () => chunksApi.myValidationTasks(),
+    refetchInterval: 15000,
   })
 
   if (isLoading) {

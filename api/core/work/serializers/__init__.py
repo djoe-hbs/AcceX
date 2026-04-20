@@ -17,6 +17,7 @@ from .work_unit import (
     ReassignProductionSerializer,
     ManualAssignUnitSerializer,
     ReportIssueSerializer,
+    BulkClientReworkSerializer,
 )
 from .work_invoice import (
     WorkClientInvoiceSerializer,

@@ -23,6 +23,7 @@ export default function ClientsPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['clients'],
     queryFn: () => clientsApi.list(),
+    refetchInterval: 15000,
   })
 
   const clients = data?.data || []

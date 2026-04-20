@@ -16,6 +16,7 @@ from .assignment_engine import (
 from .delivery_engine import (
     generate_delivery_package,
     apply_client_review,
+    send_units_for_client_rework,
     mark_batch_signed_off,
 )
 from .billing_engine import (

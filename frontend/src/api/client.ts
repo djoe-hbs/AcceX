@@ -34,11 +34,19 @@ function mapRole(role?: string): UiRole | string {
   return role ? roleMap[role] || role.toLowerCase() : ''
 }
 
+function deriveBatchDisplayStatus(batch: any): string {
+  const base = batchStatusMap[batch.status] || batch.status?.toLowerCase()
+  if (base !== 'completed') return base
+  if (batch.delivery_status === 'SIGNED_OFF') return 'fully_completed'
+  if (batch.delivery_status === 'REWORK_REQUESTED') return 'on_rework'
+  return base
+}
+
 function mapBatch(batch: any) {
   return {
     ...batch,
     title: batch.name,
-    status: batchStatusMap[batch.status] || batch.status?.toLowerCase(),
+    status: deriveBatchDisplayStatus(batch),
     created_at: batch.created,
     updated_at: batch.updated,
   }
@@ -59,9 +67,11 @@ function mapUnit(unit: any) {
     ...unit,
     chunk_id: unit.id,
     batch_id: unit.batch_id,
+    batch_name: unit.batch_name || null,
     file_name: unit.work_file_path?.split('/').pop() || unit.work_file_path,
     file_path: unit.work_file_path,
     file_type: fileType,
+    production_user_name: unit.production_user_name || null,
     status: unitStatusMap[unit.status] || unit.status?.toLowerCase(),
     unit_start: unit.range_start,
     unit_end: unit.range_end,
@@ -339,6 +349,20 @@ export const jobsApi = {
     }
   ) => api.post('/work/unit/auto-assign/', data),
   downloadCompleted: (id: string) => downloadUnitFile(`/work/batch/${id}/download-completed/`),
+  downloadClientReview: (batchId: string, reviewId: string) =>
+    downloadUnitFile(`/work/batch/${batchId}/client-review/download/${reviewId}/`),
+  clientReviews: async (id: string) => {
+    const response = await api.get(`/work/batch/${id}/client-review/`)
+    return { data: extractListData(response.data) }
+  },
+  uploadClientReview: (id: string, formData: FormData) =>
+    api.post(`/work/batch/${id}/client-review/upload/`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+  signOff: (id: string, signedOff: boolean) =>
+    api.post(`/work/batch/${id}/sign-off/`, { signed_off: signedOff }),
+  markReworkComplete: (id: string) =>
+    api.post(`/work/batch/${id}/mark-rework-complete/`),
 }
 
 export const chunksApi = {
@@ -364,17 +388,29 @@ export const chunksApi = {
     api.post(`/work/unit/${id}/submit-production/`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
-  validate: (id: string, data: { result: 'approved' | 'rejected'; rejection_reason?: string }) =>
-    api.post(`/work/unit/${id}/validate/`, {
-      decision: data.result === 'approved' ? 'APPROVE' : 'REDO',
-      reason: data.rejection_reason || '',
-    }),
+  validate: (id: string, data: { result: 'approved' | 'rejected'; rejection_reason?: string; report_file?: File }) => {
+    const formData = new FormData()
+    formData.append('decision', data.result === 'approved' ? 'APPROVE' : 'REDO')
+    formData.append('reason', data.rejection_reason || '')
+    if (data.report_file) {
+      formData.append('report_file', data.report_file)
+    }
+    return api.post(`/work/unit/${id}/validate/`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  downloadRedoReport: (id: string) => downloadUnitFile(`/work/unit/${id}/download-redo-report/`),
   reassignProduction: (id: string, data: { new_production_user_id: string; reason?: string }) =>
     api.post(`/work/unit/${id}/reassign-production/`, data),
   manualAssign: (id: string, data: { production_user_id: string; validation_user_id: string; reason?: string }) =>
     api.post(`/work/unit/${id}/manual-assign/`, data),
   downloadSource: (id: string) => downloadUnitFile(`/work/unit/${id}/download-source/`),
   downloadProduction: (id: string) => downloadUnitFile(`/work/unit/${id}/download-production/`),
+  bulkClientRework: (data: {
+    batch_id: string
+    assignments: { unit_id: string; production_user_id: string; validation_user_id: string }[]
+    reason?: string
+  }) => api.post('/work/unit/bulk-client-rework/', data),
 }
 
 async function downloadUnitFile(path: string) {

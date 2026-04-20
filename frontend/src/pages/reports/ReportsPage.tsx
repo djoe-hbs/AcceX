@@ -28,6 +28,7 @@ function MyReport() {
   const { data, isLoading } = useQuery({
     queryKey: ['reports-me'],
     queryFn: () => analyticsApi.myReport(),
+    refetchInterval: 15000,
   })
 
   if (isLoading) return <PageLoader />
@@ -74,6 +75,7 @@ function AdminReports() {
   const { data, isLoading } = useQuery({
     queryKey: ['reports-users'],
     queryFn: () => analyticsApi.usersReport(),
+    refetchInterval: 15000,
   })
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
 
@@ -160,6 +162,7 @@ function UserDetail({ userId, onClose }: { userId: string; onClose: () => void }
   const { data, isLoading } = useQuery({
     queryKey: ['reports-user', userId],
     queryFn: () => analyticsApi.userReport(userId),
+    refetchInterval: 15000,
   })
 
   const report = data?.data

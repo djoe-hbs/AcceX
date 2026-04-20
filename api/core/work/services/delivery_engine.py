@@ -6,9 +6,10 @@ from pathlib import Path
 from django.conf import settings
 from django.core.files import File
 from django.db import transaction
+from django.utils import timezone
 
-from core.work.models import WorkBatch, WorkDeliveryPackage, WorkClientReview, WorkFile, WorkUnit
-from core.work.services.assignment_engine import unassign_unit
+from core.work.models import WorkBatch, WorkDeliveryPackage, WorkClientReview, WorkFile, WorkUnit, WorkUnitAssignment
+from core.work.services.assignment_engine import unassign_unit, close_active_assignments
 
 
 def _resolve_source_file_path(batch: WorkBatch, work_file: WorkFile):
@@ -109,15 +110,51 @@ def apply_client_review(batch: WorkBatch, review_file, review_note, uploaded_by)
             assigned_to_sme=batch.initiated_by_sme,
         )
 
-        units = WorkUnit.objects.filter(batch=batch)
-        for unit in units:
-            if unit.status == WorkUnit.Status.COMPLETED:
-                unassign_unit(unit, reason="Client requested rework.")
-
         batch.delivery_status = WorkBatch.DeliveryStatus.REWORK_REQUESTED
         batch.save(update_fields=["delivery_status", "updated"])
 
     return review
+
+
+def send_units_for_client_rework(unit_assignments, assigned_by, reason="Client requested rework."):
+    """
+    SME selects which completed units go for rework and to which users.
+    unit_assignments: list of (unit, production_user, validation_user) tuples
+    """
+    with transaction.atomic():
+        for unit, production_user, validation_user in unit_assignments:
+            close_active_assignments(unit, WorkUnitAssignment.Stage.PRODUCTION)
+            close_active_assignments(unit, WorkUnitAssignment.Stage.VALIDATION)
+
+            unit.current_production_assignee = production_user
+            unit.current_validation_assignee = validation_user
+            unit.status = WorkUnit.Status.REDO
+            unit.redo_reason = reason
+            unit.validator_feedback = reason
+            unit.production_assigned_at = timezone.now()
+            unit.save(update_fields=[
+                "current_production_assignee",
+                "current_validation_assignee",
+                "status", "redo_reason", "validator_feedback",
+                "production_assigned_at", "updated",
+            ])
+
+            WorkUnitAssignment.objects.create(
+                unit=unit,
+                stage=WorkUnitAssignment.Stage.PRODUCTION,
+                assignee=production_user,
+                assigned_by=assigned_by,
+                is_active=True,
+                reason=reason,
+            )
+            WorkUnitAssignment.objects.create(
+                unit=unit,
+                stage=WorkUnitAssignment.Stage.VALIDATION,
+                assignee=validation_user,
+                assigned_by=assigned_by,
+                is_active=True,
+                reason=reason,
+            )
 
 
 def mark_batch_signed_off(batch: WorkBatch, signed_off: bool):

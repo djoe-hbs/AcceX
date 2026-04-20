@@ -13,7 +13,7 @@ import {
 } from '@/components/shared'
 import { FileTreeViewer } from '@/components/shared/FileTree'
 import { useAuth } from '@/store/auth'
-import { ChevronRight, Download, Plus, Trash2, Upload, UserCheck, Users } from 'lucide-react'
+import { CheckCircle, ChevronRight, Download, MessageSquare, Plus, Trash2, Upload, UserCheck, Users } from 'lucide-react'
 
 export function JobsListPage() {
   const { isRole } = useAuth()
@@ -22,6 +22,7 @@ export function JobsListPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['jobs'],
     queryFn: () => jobsApi.list(),
+    refetchInterval: 15000,
   })
 
   const jobs = data?.data || []
@@ -177,30 +178,53 @@ function CreateJobModal({ onClose }: { onClose: () => void }) {
 export function JobDetailPage() {
   const { id } = useParams()
   const { isRole } = useAuth()
+  const queryClient = useQueryClient()
   const [downloading, setDownloading] = useState(false)
+  const [showSignOff, setShowSignOff] = useState(false)
+
+  const signOffMutation = useMutation({
+    mutationFn: () => jobsApi.signOff(id || '', true),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['job', id] })
+      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+      setShowSignOff(false)
+    },
+  })
+
+  const markReworkCompleteMutation = useMutation({
+    mutationFn: () => jobsApi.markReworkComplete(id || ''),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['job', id] })
+      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+    },
+  })
 
   const { data: jobData, isLoading: jobLoading, isError: jobError } = useQuery({
     queryKey: ['job', id],
     queryFn: () => jobsApi.get(id || ''),
     enabled: Boolean(id),
+    refetchInterval: 15000,
   })
 
   const { data: filesData, isLoading: filesLoading } = useQuery({
     queryKey: ['job-files', id],
     queryFn: () => jobsApi.files(id || ''),
     enabled: Boolean(id),
+    refetchInterval: 15000,
   })
 
   const { data: membersData, isLoading: membersLoading } = useQuery({
     queryKey: ['job-members', id],
     queryFn: () => jobsApi.members(id || ''),
     enabled: Boolean(id),
+    refetchInterval: 15000,
   })
 
   const { data: unitsData, isLoading: unitsLoading } = useQuery({
     queryKey: ['job-units', id],
     queryFn: () => chunksApi.byBatch(id || ''),
     enabled: Boolean(id),
+    refetchInterval: 15000,
   })
 
   if (jobLoading || filesLoading || membersLoading || unitsLoading) {
@@ -247,7 +271,11 @@ export function JobDetailPage() {
         </div>
         <div className="flex items-center gap-3">
           <JobStatusBadge status={job?.status || ''} />
-          {job?.status === 'completed' && isRole('superadmin', 'admin') && (
+          <Link to={`/jobs/${id}/feedback`} className="btn-secondary">
+            <MessageSquare className="w-4 h-4" />
+            Client Feedback
+          </Link>
+          {['completed', 'on_rework', 'fully_completed'].includes(job?.status) && isRole('superadmin', 'admin') && (
             <button
               className="btn-primary"
               onClick={handleDownloadCompleted}
@@ -255,6 +283,22 @@ export function JobDetailPage() {
             >
               <Download className="w-4 h-4" />
               {downloading ? 'Downloading...' : 'Download Completed Files'}
+            </button>
+          )}
+          {job?.status === 'on_rework' && isRole('sme') && (
+            <button
+              className="btn-primary"
+              onClick={() => markReworkCompleteMutation.mutate()}
+              disabled={markReworkCompleteMutation.isPending}
+            >
+              <CheckCircle className="w-4 h-4" />
+              {markReworkCompleteMutation.isPending ? 'Updating...' : 'Completed'}
+            </button>
+          )}
+          {job?.status === 'completed' && isRole('superadmin') && (
+            <button className="btn-primary !bg-green-600 !border-green-600 hover:!bg-green-700" onClick={() => setShowSignOff(true)}>
+              <CheckCircle className="w-4 h-4" />
+              Sign Off
             </button>
           )}
         </div>
@@ -300,6 +344,29 @@ export function JobDetailPage() {
           </div>
         </div>
       </div>
+
+      <Modal open={showSignOff} onClose={() => setShowSignOff(false)} title="Sign Off Job" size="sm">
+        <div className="space-y-4">
+          {signOffMutation.isError && (
+            <Alert type="error" message={(signOffMutation.error as any)?.response?.data?.detail || 'Sign off failed.'} />
+          )}
+          <p className="text-sm text-gray-700">
+            Are you sure you want to sign off this job? This confirms the client has accepted the delivered work.
+            No further reworks or client feedback will be possible.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button className="btn-secondary" onClick={() => setShowSignOff(false)}>Cancel</button>
+            <button
+              className="btn-primary !bg-green-600 !border-green-600 hover:!bg-green-700"
+              onClick={() => signOffMutation.mutate()}
+              disabled={signOffMutation.isPending}
+            >
+              <CheckCircle className="w-4 h-4" />
+              {signOffMutation.isPending ? 'Signing off...' : 'Confirm Sign Off'}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

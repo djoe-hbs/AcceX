@@ -12,7 +12,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from core.permissions import can_manage_work_batches, is_sme
-from core.work.models import WorkBatch, WorkBatchMember, WorkUnit, WorkDeliveryPackage, WorkClientReview
+from django.conf import settings
+from core.work.models import WorkBatch, WorkBatchMember, WorkUnit, WorkFile, WorkDeliveryPackage, WorkClientReview
 from core.work.serializers import (
     WorkBatchSerializer,
     WorkFileSerializer,
@@ -155,6 +156,27 @@ class WorkBatchViewSet(viewsets.ModelViewSet):
         serializer = ClientReviewUploadSerializer(queryset, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["get"], url_path=r"client-review/download/(?P<review_id>[^/.]+)")
+    def download_client_review(self, request, pk=None, review_id=None):
+        if not self._has_read_access():
+            raise PermissionDenied("Only superadmin/admin/SME can download client review files.")
+
+        batch = self.get_object()
+        try:
+            review = WorkClientReview.objects.get(batch=batch, public_id=review_id)
+        except (WorkClientReview.DoesNotExist, ValueError, TypeError):
+            raise NotFound("Client review not found.")
+
+        if not review.review_file:
+            raise NotFound("Review file is not available.")
+
+        file_path = Path(review.review_file.path)
+        if not file_path.exists() or not file_path.is_file():
+            raise NotFound("Review file not found on disk.")
+
+        handle = open(file_path, "rb")
+        return FileResponse(handle, as_attachment=True, filename=file_path.name)
+
     @action(detail=True, methods=["post"], url_path="sign-off")
     def sign_off(self, request, pk=None):
         if not can_manage_work_batches(request.user):
@@ -167,6 +189,28 @@ class WorkBatchViewSet(viewsets.ModelViewSet):
         updated_batch = mark_batch_signed_off(batch, serializer.validated_data["signed_off"])
         return Response(WorkBatchSerializer(updated_batch).data, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["post"], url_path="mark-rework-complete")
+    def mark_rework_complete(self, request, pk=None):
+        if not is_sme(request.user):
+            raise PermissionDenied("Only SME can mark rework as complete.")
+
+        batch = self.get_object()
+
+        if batch.delivery_status != WorkBatch.DeliveryStatus.REWORK_REQUESTED:
+            raise PermissionDenied("This job is not currently in rework status.")
+
+        batch.delivery_status = WorkBatch.DeliveryStatus.CLIENT_REVIEW_PENDING
+        update_fields = ["delivery_status", "updated"]
+
+        # Also ensure batch status is COMPLETED if all units are done
+        has_incomplete = batch.units.exclude(status=WorkUnit.Status.COMPLETED).exists()
+        if not has_incomplete and batch.status != WorkBatch.Status.COMPLETED:
+            batch.status = WorkBatch.Status.COMPLETED
+            update_fields.append("status")
+
+        batch.save(update_fields=update_fields)
+        return Response(WorkBatchSerializer(batch).data, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=["get"], url_path="download-completed")
     def download_completed(self, request, pk=None):
         if not can_manage_work_batches(request.user):
@@ -174,27 +218,52 @@ class WorkBatchViewSet(viewsets.ModelViewSet):
 
         batch = self.get_object()
 
-        if batch.status != WorkBatch.Status.COMPLETED:
-            return Response(
-                {"detail": "Job is not yet completed. All files must be validated before download."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Collect production outputs from completed units
-        completed_units = WorkUnit.objects.filter(
-            batch=batch,
-            status=WorkUnit.Status.COMPLETED,
-        ).select_related("work_file").exclude(production_output="")
+        # Build zip with the latest production output per file.
+        # For each work file: use the most recently uploaded production output
+        # (handles rework — new output replaces the old one in the zip).
+        # Files without any output fall back to the original source file.
+        work_files = (
+            batch.files.filter(is_directory=False)
+            .exclude(file_type=WorkFile.FileType.ZIP)
+            .order_by("relative_path")
+        )
 
         files_to_zip = []
-        for unit in completed_units:
-            if unit.production_output:
-                output_path = Path(unit.production_output.path)
-                if output_path.exists() and output_path.is_file():
-                    files_to_zip.append((output_path, unit.work_file.relative_path))
+        seen_paths = set()
+
+        for work_file in work_files:
+            # Find the latest production output across all units for this file
+            units = (
+                WorkUnit.objects.filter(work_file=work_file)
+                .exclude(production_output="")
+                .order_by("-production_output_uploaded_at", "-updated")
+            )
+
+            source_path = None
+            for unit in units:
+                if unit.production_output:
+                    candidate = Path(unit.production_output.path)
+                    if candidate.exists() and candidate.is_file():
+                        source_path = candidate
+                        break
+
+            # Fallback to the original source file from extraction
+            if not source_path and batch.extraction_root:
+                root = (Path(settings.MEDIA_ROOT) / batch.extraction_root).resolve()
+                candidate = (root / work_file.relative_path).resolve()
+                try:
+                    candidate.relative_to(root)
+                    if candidate.exists() and candidate.is_file():
+                        source_path = candidate
+                except ValueError:
+                    pass
+
+            if source_path and work_file.relative_path not in seen_paths:
+                files_to_zip.append((source_path, work_file.relative_path))
+                seen_paths.add(work_file.relative_path)
 
         if not files_to_zip:
-            raise NotFound("No completed files available for download.")
+            raise NotFound("No files available for download.")
 
         tmp = tempfile.NamedTemporaryFile(
             prefix=f"completed_{batch.public_id.hex}_",

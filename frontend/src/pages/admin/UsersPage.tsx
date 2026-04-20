@@ -13,6 +13,7 @@ export default function UsersPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['users', roleFilter],
     queryFn: () => usersApi.list(roleFilter ? { role: roleFilter } : undefined),
+    refetchInterval: 15000,
   })
 
   const users = useMemo(() => data?.data || [], [data?.data])

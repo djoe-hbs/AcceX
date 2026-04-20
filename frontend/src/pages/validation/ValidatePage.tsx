@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { chunksApi } from '@/api/client'
 import { Alert, ChunkStatusBadge, EmptyState, Modal, PageLoader } from '@/components/shared'
-import { CheckCircle, Download, XCircle } from 'lucide-react'
+import { CheckCircle, Download, Upload, XCircle } from 'lucide-react'
 
 export default function ValidatePage() {
   const queryClient = useQueryClient()
   const [selectedRejectTask, setSelectedRejectTask] = useState<any>(null)
   const [rejectReason, setRejectReason] = useState('')
+  const [reportFile, setReportFile] = useState<File | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   const { data, isLoading } = useQuery({
@@ -17,8 +18,8 @@ export default function ValidatePage() {
   })
 
   const validateMutation = useMutation({
-    mutationFn: ({ taskId, result, rejectionReason }: { taskId: string; result: 'approved' | 'rejected'; rejectionReason?: string }) =>
-      chunksApi.validate(taskId, { result, rejection_reason: rejectionReason }),
+    mutationFn: ({ taskId, result, rejectionReason, reportFile }: { taskId: string; result: 'approved' | 'rejected'; rejectionReason?: string; reportFile?: File }) =>
+      chunksApi.validate(taskId, { result, rejection_reason: rejectionReason, report_file: reportFile }),
     onSuccess: (_, variables) => {
       setMessage({
         type: 'success',
@@ -26,6 +27,7 @@ export default function ValidatePage() {
       })
       setSelectedRejectTask(null)
       setRejectReason('')
+      setReportFile(null)
       queryClient.invalidateQueries({ queryKey: ['validation-tasks'] })
     },
     onError: (err: any) => {
@@ -95,15 +97,36 @@ export default function ValidatePage() {
         {tasks.length === 0 && <EmptyState title="Queue is clear" description="No units are waiting for validation." />}
       </div>
 
-      <Modal open={Boolean(selectedRejectTask)} onClose={() => setSelectedRejectTask(null)} title="Reject Unit" size="sm">
+      <Modal open={Boolean(selectedRejectTask)} onClose={() => { setSelectedRejectTask(null); setReportFile(null) }} title="Reject Unit" size="sm">
         <div className="space-y-4">
           <p className="text-sm text-gray-600">Provide the reason the unit should return to production.</p>
           <textarea className="input min-h-[120px]" value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} />
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Attach Report (optional)</label>
+            <div className="flex items-center gap-2">
+              <label className="btn-secondary py-1.5 text-xs cursor-pointer inline-flex items-center gap-1">
+                <Upload className="w-3.5 h-3.5" />
+                {reportFile ? reportFile.name : 'Choose Excel file'}
+                <input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  className="hidden"
+                  onChange={(e) => setReportFile(e.target.files?.[0] || null)}
+                />
+              </label>
+              {reportFile && (
+                <button type="button" className="text-xs text-red-500 hover:text-red-700" onClick={() => setReportFile(null)}>
+                  Remove
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-gray-400 mt-1">Only .xlsx or .xls files accepted</p>
+          </div>
           <div className="flex justify-end gap-2">
-            <button className="btn-secondary" onClick={() => setSelectedRejectTask(null)}>Cancel</button>
+            <button className="btn-secondary" onClick={() => { setSelectedRejectTask(null); setReportFile(null) }}>Cancel</button>
             <button
               className="btn-danger"
-              onClick={() => selectedRejectTask && validateMutation.mutate({ taskId: selectedRejectTask.chunk_id, result: 'rejected', rejectionReason: rejectReason })}
+              onClick={() => selectedRejectTask && validateMutation.mutate({ taskId: selectedRejectTask.chunk_id, result: 'rejected', rejectionReason: rejectReason, reportFile: reportFile || undefined })}
               disabled={!rejectReason.trim() || validateMutation.isPending}
             >
               {validateMutation.isPending ? 'Sending...' : 'Reject'}

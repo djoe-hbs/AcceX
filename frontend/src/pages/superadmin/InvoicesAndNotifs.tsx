@@ -61,11 +61,13 @@ export function InvoicesPage() {
   const { data: clientsResponse } = useQuery({
     queryKey: ['clients'],
     queryFn: () => clientsApi.list(),
+    refetchInterval: 15000,
   })
 
   const { data: invoicesResponse, isLoading } = useQuery({
     queryKey: ['invoices', invoiceFilters],
     queryFn: () => invoiceApi.list(invoiceFilters),
+    refetchInterval: 15000,
   })
 
   const selectedInvoice = useMemo(
@@ -433,11 +435,12 @@ function InvoiceDetailsModal({
   onError: (message: string) => void
 }) {
   const queryClient = useQueryClient()
-  const [recipients, setRecipients] = useState('')
+  const [recipients, setRecipients] = useState('vibecoder.hbs@gmail.com')
 
   const { data, isLoading } = useQuery({
     queryKey: ['invoice', invoiceId],
     queryFn: () => invoiceApi.get(invoiceId),
+    refetchInterval: 15000,
   })
 
   const invoice = data?.data

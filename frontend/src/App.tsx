@@ -14,12 +14,13 @@ import { InvoicesPage, NotificationsPage } from '@/pages/superadmin/InvoicesAndN
 import SettingsPage from '@/pages/SettingsPage'
 import ChunkProgressPage from '@/pages/sme/ChunkProgressPage'
 import ReworkHistoryPage from '@/pages/sme/ReworkHistoryPage'
+import FeedbackPage from '@/pages/jobs/FeedbackPage'
 import AnalyticsPage from '@/pages/analytics/AnalyticsPage'
 import ReportsPage from '@/pages/reports/ReportsPage'
 import { PageLoader } from '@/components/shared'
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
+  defaultOptions: { queries: { retry: 1, staleTime: 10_000, refetchOnWindowFocus: true } },
 })
 
 function ProtectedRoute({ children, roles }: { children: ReactNode; roles?: string[] }) {
@@ -43,6 +44,7 @@ function AppRoutes() {
       <Route path="/jobs" element={<ProtectedRoute roles={['superadmin','admin','sme']}><JobsListPage /></ProtectedRoute>} />
       <Route path="/jobs/:id" element={<ProtectedRoute roles={['superadmin','admin','sme']}><JobDetailPage /></ProtectedRoute>} />
       <Route path="/jobs/:id/chunks" element={<ProtectedRoute roles={['superadmin','admin','sme']}><ChunkProgressPage /></ProtectedRoute>} />
+      <Route path="/jobs/:id/feedback" element={<ProtectedRoute roles={['superadmin','admin','sme']}><FeedbackPage /></ProtectedRoute>} />
 
       {/* Chunk rework history - accessible to all who can see jobs */}
       <Route path="/chunks/:chunkId/history" element={<ProtectedRoute roles={['superadmin','admin','sme','validation']}><ReworkHistoryPage /></ProtectedRoute>} />

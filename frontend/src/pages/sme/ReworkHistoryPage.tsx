@@ -11,6 +11,7 @@ export default function ReworkHistoryPage() {
     queryKey: ['chunk', chunkId],
     queryFn: () => chunksApi.get(chunkId || ''),
     enabled: Boolean(chunkId),
+    refetchInterval: 15000,
   })
 
   if (isLoading) {

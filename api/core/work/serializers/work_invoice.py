@@ -58,5 +58,5 @@ class SendInvoiceEmailSerializer(serializers.Serializer):
     recipients = serializers.ListField(
         child=serializers.EmailField(),
         required=False,
-        allow_empty=False,
+        allow_empty=True,
     )

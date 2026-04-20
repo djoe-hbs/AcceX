@@ -11,16 +11,19 @@ class WorkUnitSerializer(serializers.ModelSerializer):
     work_file_path = serializers.CharField(source="work_file.relative_path", read_only=True)
     production_user_id = serializers.UUIDField(source="current_production_assignee.public_id", read_only=True, format="hex")
     validation_user_id = serializers.UUIDField(source="current_validation_assignee.public_id", read_only=True, format="hex")
+    batch_name = serializers.CharField(source="batch.name", read_only=True)
+    production_user_name = serializers.CharField(source="current_production_assignee.name", read_only=True, default=None)
     production_output = serializers.FileField(read_only=True)
+    redo_report_file = serializers.FileField(read_only=True)
     collaborators = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = WorkUnit
         fields = [
-            "id", "batch_id", "work_file_id", "work_file_path", "unit_number",
+            "id", "batch_id", "batch_name", "work_file_id", "work_file_path", "unit_number",
             "range_start", "range_end", "count_type", "workload_count",
-            "status", "production_user_id", "validation_user_id", "redo_reason",
-            "production_output", "production_output_uploaded_at", "validator_feedback",
+            "status", "production_user_id", "production_user_name", "validation_user_id", "redo_reason",
+            "production_output", "production_output_uploaded_at", "validator_feedback", "redo_report_file",
             "production_assigned_at", "production_submitted_at", "validation_completed_at",
             "collaborators", "created", "updated",
         ]
@@ -172,6 +175,12 @@ class ValidationDecisionSerializer(serializers.Serializer):
 
     decision = serializers.ChoiceField(choices=DecisionChoices.CHOICES)
     reason = serializers.CharField(required=False, allow_blank=True)
+    report_file = serializers.FileField(required=False, allow_null=True)
+
+    def validate_report_file(self, value):
+        if value and not value.name.endswith(('.xlsx', '.xls')):
+            raise serializers.ValidationError("Only Excel files (.xlsx, .xls) are allowed.")
+        return value
 
     def validate(self, attrs):
         if attrs["decision"] == self.DecisionChoices.REDO and not attrs.get("reason"):
@@ -207,6 +216,66 @@ class ManualAssignUnitSerializer(serializers.Serializer):
 
         attrs["production_user"] = production_user
         attrs["validation_user"] = validation_user
+        return attrs
+
+
+class BulkClientReworkItemSerializer(serializers.Serializer):
+    unit_id = serializers.UUIDField()
+    production_user_id = serializers.UUIDField()
+    validation_user_id = serializers.UUIDField()
+
+
+class BulkClientReworkSerializer(serializers.Serializer):
+    batch_id = serializers.UUIDField()
+    assignments = BulkClientReworkItemSerializer(many=True, allow_empty=False)
+    reason = serializers.CharField(required=False, default="Client requested rework.")
+
+    def validate(self, attrs):
+        from core.work.models import WorkBatch
+
+        try:
+            batch = WorkBatch.objects.get(public_id=attrs["batch_id"])
+        except WorkBatch.DoesNotExist:
+            raise serializers.ValidationError({"batch_id": "Work batch does not exist."})
+
+        unit_ids = [a["unit_id"] for a in attrs["assignments"]]
+        prod_ids = list({a["production_user_id"] for a in attrs["assignments"]})
+        val_ids = list({a["validation_user_id"] for a in attrs["assignments"]})
+
+        units = {
+            u.public_id: u
+            for u in WorkUnit.objects.filter(public_id__in=unit_ids, batch=batch)
+            .select_related("current_production_assignee", "current_validation_assignee")
+        }
+        prod_users = {
+            u.public_id: u
+            for u in User.objects.filter(public_id__in=prod_ids, role=User.Role.PRODUCTION_USER)
+        }
+        val_users = {
+            u.public_id: u
+            for u in User.objects.filter(public_id__in=val_ids, role=User.Role.VALIDATION_USER)
+        }
+
+        resolved = []
+        for item in attrs["assignments"]:
+            unit = units.get(item["unit_id"])
+            if not unit:
+                raise serializers.ValidationError({"assignments": f"Unit {item['unit_id']} not found in this batch."})
+            if unit.status != WorkUnit.Status.COMPLETED:
+                raise serializers.ValidationError({"assignments": f"Unit {item['unit_id']} is not in completed status."})
+
+            prod_user = prod_users.get(item["production_user_id"])
+            if not prod_user:
+                raise serializers.ValidationError({"assignments": f"Production user {item['production_user_id']} is invalid."})
+
+            val_user = val_users.get(item["validation_user_id"])
+            if not val_user:
+                raise serializers.ValidationError({"assignments": f"Validation user {item['validation_user_id']} is invalid."})
+
+            resolved.append((unit, prod_user, val_user))
+
+        attrs["batch"] = batch
+        attrs["resolved_assignments"] = resolved
         return attrs
 
 
