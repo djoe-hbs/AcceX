@@ -15,7 +15,38 @@ from core.work.models import (
 )
 
 
-def initialize_work_units(batch: WorkBatch, split_threshold=100, split_chunk_size=25):
+def _get_cross_job_workloads(production_users):
+    """
+    Return {user.pk: total_workload} across ALL active jobs for each user.
+    Active = ASSIGNED_TO_PRODUCTION or REDO status.
+    """
+    active_statuses = [WorkUnit.Status.ASSIGNED_TO_PRODUCTION, WorkUnit.Status.REDO]
+    user_pks = [u.pk for u in production_users]
+
+    totals = (
+        WorkUnit.objects.filter(
+            current_production_assignee_id__in=user_pks,
+            status__in=active_statuses,
+        )
+        .values("current_production_assignee_id")
+        .annotate(total=models.Sum("workload_count"))
+    )
+
+    workloads = {pk: 0 for pk in user_pks}
+    for row in totals:
+        workloads[row["current_production_assignee_id"]] = row["total"] or 0
+
+    return workloads
+
+
+def _pick_least_loaded(workloads, user_by_pk):
+    """Return the user with the minimum current workload."""
+    best_pk = min(workloads, key=lambda pk: workloads[pk])
+    return user_by_pk[best_pk]
+
+
+def initialize_work_units(batch: WorkBatch):
+    """Create one WorkUnit per eligible file (no splitting)."""
     if WorkUnit.objects.filter(batch=batch).exists():
         return
 
@@ -25,41 +56,21 @@ def initialize_work_units(batch: WorkBatch, split_threshold=100, split_chunk_siz
     for work_file in eligible_files:
         count = work_file.count or 0
         count_type = work_file.count_type
+        range_start = 1 if count_type != WorkFile.CountType.NONE and count > 0 else None
+        range_end = count if count_type != WorkFile.CountType.NONE and count > 0 else None
+        workload_count = count if count > 0 else 1
 
-        if count_type != WorkFile.CountType.NONE and count > split_threshold:
-            start = 1
-            unit_number = 1
-            while start <= count:
-                end = min(start + split_chunk_size - 1, count)
-                units_to_create.append(
-                    WorkUnit(
-                        batch=batch,
-                        work_file=work_file,
-                        unit_number=unit_number,
-                        range_start=start,
-                        range_end=end,
-                        count_type=count_type,
-                        workload_count=(end - start + 1),
-                    )
-                )
-                unit_number += 1
-                start = end + 1
-        else:
-            range_start = 1 if count_type != WorkFile.CountType.NONE and count > 0 else None
-            range_end = count if count_type != WorkFile.CountType.NONE and count > 0 else None
-            workload_count = count if count > 0 else 1
-
-            units_to_create.append(
-                WorkUnit(
-                    batch=batch,
-                    work_file=work_file,
-                    unit_number=1,
-                    range_start=range_start,
-                    range_end=range_end,
-                    count_type=count_type,
-                    workload_count=workload_count,
-                )
+        units_to_create.append(
+            WorkUnit(
+                batch=batch,
+                work_file=work_file,
+                unit_number=1,
+                range_start=range_start,
+                range_end=range_end,
+                count_type=count_type,
+                workload_count=workload_count,
             )
+        )
 
     WorkUnit.objects.bulk_create(units_to_create)
 
@@ -137,128 +148,19 @@ def auto_assign_units(
     production_users,
     validation_users,
     assigned_by,
-    batch_size_per_production_user=None,
-    split_threshold=100,
-    split_chunk_size=25,
+    **_kwargs,
 ):
-    num_users = len(production_users)
+    """
+    Greedy min-workload assignment.
 
-    # ── Re-run: units already exist → assign pending ones balanced ──
-    if WorkUnit.objects.filter(batch=batch).exists():
-        return _assign_pending_units_balanced(
-            batch, production_users, validation_users, assigned_by,
-            batch_size_per_production_user,
-        )
+    1. Create one unit per file if units don't exist yet.
+    2. Get each worker's current cross-job workload.
+    3. For each pending unit, assign to the worker with the least total
+       workload, then add the unit's count to that worker's running total.
+    """
+    # ── Ensure units exist (one per file, no splitting) ──
+    initialize_work_units(batch)
 
-    # ── First run: create units split equally across users ──
-    eligible_files = list(
-        batch.files.filter(is_directory=False)
-        .exclude(file_type=WorkFile.FileType.ZIP)
-        .order_by("relative_path")
-    )
-
-    if not eligible_files:
-        return 0
-
-    # Total workload across every file in the batch (recursive folders
-    # are already flattened — every non-directory file is in the table).
-    total_workload = 0
-    for f in eligible_files:
-        if f.count_type != WorkFile.CountType.NONE and f.count and f.count > 0:
-            total_workload += f.count
-        else:
-            total_workload += 1
-
-    fair_share = math.ceil(total_workload / num_users)
-
-    # Optional manual cap for batch-by-batch assignment.
-    if batch_size_per_production_user and batch_size_per_production_user < fair_share:
-        workload_cap = batch_size_per_production_user
-    else:
-        workload_cap = fair_share
-
-    # Persist for auto-refill.
-    batch.auto_batch_size_per_production_user = workload_cap
-    batch.save(update_fields=["auto_batch_size_per_production_user", "updated"])
-
-    validation_cycle = cycle(validation_users)
-    user_idx = 0
-    user_pages = 0
-    total_assigned = 0
-
-    with transaction.atomic():
-        for work_file in eligible_files:
-            file_count = work_file.count or 0
-            is_countable = (
-                work_file.count_type != WorkFile.CountType.NONE
-                and file_count > 0
-            )
-
-            if not is_countable:
-                # ── Non-countable file → single whole-file unit ──
-                unit = WorkUnit.objects.create(
-                    batch=batch,
-                    work_file=work_file,
-                    unit_number=1,
-                    count_type=work_file.count_type,
-                    workload_count=1,
-                )
-                prod = production_users[user_idx]
-                assign_unit(unit, prod, next(validation_cycle), assigned_by)
-                total_assigned += 1
-                user_pages += 1
-
-                if user_pages >= workload_cap and user_idx < num_users - 1:
-                    user_idx += 1
-                    user_pages = 0
-            else:
-                # ── Countable file → split at user boundaries ──
-                remaining = file_count
-                page_cursor = 1
-                unit_num = 1
-
-                while remaining > 0:
-                    # Advance to next user if current one is full.
-                    while user_pages >= workload_cap and user_idx < num_users - 1:
-                        user_idx += 1
-                        user_pages = 0
-
-                    # How many pages this user takes from this file.
-                    if user_idx < num_users - 1:
-                        can_take = workload_cap - user_pages
-                        chunk = min(remaining, can_take)
-                    else:
-                        # Last user absorbs everything left (odd remainder).
-                        chunk = remaining
-
-                    page_end = page_cursor + chunk - 1
-
-                    unit = WorkUnit.objects.create(
-                        batch=batch,
-                        work_file=work_file,
-                        unit_number=unit_num,
-                        range_start=page_cursor,
-                        range_end=page_end,
-                        count_type=work_file.count_type,
-                        workload_count=chunk,
-                    )
-                    prod = production_users[user_idx]
-                    assign_unit(unit, prod, next(validation_cycle), assigned_by)
-                    total_assigned += 1
-
-                    user_pages += chunk
-                    remaining -= chunk
-                    page_cursor = page_end + 1
-                    unit_num += 1
-
-    return total_assigned
-
-
-def _assign_pending_units_balanced(
-    batch, production_users, validation_users, assigned_by,
-    batch_size_per_production_user=None,
-):
-    """Re-run: assign already-created pending units with workload balancing."""
     pending_units = list(
         WorkUnit.objects.filter(batch=batch, status=WorkUnit.Status.PENDING)
         .select_related("work_file")
@@ -268,38 +170,19 @@ def _assign_pending_units_balanced(
     if not pending_units:
         return 0
 
-    num_users = len(production_users)
-    total_pending = sum(u.workload_count for u in pending_units)
-    fair_share = math.ceil(total_pending / num_users)
-
-    if batch_size_per_production_user and batch_size_per_production_user < fair_share:
-        workload_cap = batch_size_per_production_user
-    else:
-        workload_cap = fair_share
+    # ── Live cross-job workloads ──
+    workloads = _get_cross_job_workloads(production_users)
+    user_by_pk = {u.pk: u for u in production_users}
 
     validation_cycle = cycle(validation_users)
-    workloads = {user.pk: 0 for user in production_users}
-    user_by_pk = {user.pk: user for user in production_users}
-    exhausted = set()
     total_assigned = 0
 
     with transaction.atomic():
         for unit in pending_units:
-            if len(exhausted) >= num_users:
-                break
-
-            best_pk = min(
-                (pk for pk in workloads if pk not in exhausted),
-                key=lambda pk: workloads[pk],
-            )
-            prod = user_by_pk[best_pk]
+            prod = _pick_least_loaded(workloads, user_by_pk)
             assign_unit(unit, prod, next(validation_cycle), assigned_by)
-
+            workloads[prod.pk] += unit.workload_count
             total_assigned += 1
-            workloads[best_pk] += unit.workload_count
-
-            if workloads[best_pk] >= workload_cap:
-                exhausted.add(best_pk)
 
     return total_assigned
 

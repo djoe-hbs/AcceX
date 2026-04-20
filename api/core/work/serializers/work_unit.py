@@ -15,7 +15,6 @@ class WorkUnitSerializer(serializers.ModelSerializer):
     production_user_name = serializers.CharField(source="current_production_assignee.name", read_only=True, default=None)
     production_output = serializers.FileField(read_only=True)
     redo_report_file = serializers.FileField(read_only=True)
-    collaborators = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = WorkUnit
@@ -25,36 +24,8 @@ class WorkUnitSerializer(serializers.ModelSerializer):
             "status", "production_user_id", "production_user_name", "validation_user_id", "redo_reason",
             "production_output", "production_output_uploaded_at", "validator_feedback", "redo_report_file",
             "production_assigned_at", "production_submitted_at", "validation_completed_at",
-            "collaborators", "created", "updated",
+            "created", "updated",
         ]
-
-    def get_collaborators(self, obj):
-        queryset = (
-            WorkUnit.objects.filter(
-                work_file=obj.work_file,
-                status__in=[
-                    WorkUnit.Status.ASSIGNED_TO_PRODUCTION,
-                    WorkUnit.Status.REDO,
-                    WorkUnit.Status.IN_VALIDATION,
-                ],
-            )
-            .exclude(current_production_assignee=None)
-            .select_related("current_production_assignee")
-            .order_by("unit_number")
-        )
-
-        user_map = {}
-        for unit in queryset:
-            user = unit.current_production_assignee
-            if not user:
-                continue
-            uid = user.public_id.hex
-            if uid not in user_map:
-                user_map[uid] = {"id": uid, "name": user.name, "chunks": []}
-            if unit.range_start:
-                user_map[uid]["chunks"].append(f"{unit.range_start}-{unit.range_end}")
-
-        return list(user_map.values())
 
 
 class WorkBatchMemberSerializer(serializers.ModelSerializer):
@@ -99,10 +70,6 @@ class AutoAssignSerializer(serializers.Serializer):
     batch_id = serializers.UUIDField()
     production_user_ids = serializers.ListField(child=serializers.UUIDField(), required=False, allow_empty=False)
     validation_user_ids = serializers.ListField(child=serializers.UUIDField(), required=False, allow_empty=False)
-
-    batch_size_per_production_user = serializers.IntegerField(required=False, default=None, min_value=1, allow_null=True)
-    split_threshold = serializers.IntegerField(required=False, default=100, min_value=1)
-    split_chunk_size = serializers.IntegerField(required=False, default=25, min_value=1)
 
     def validate(self, attrs):
         batch_id = attrs["batch_id"]

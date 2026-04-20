@@ -446,10 +446,6 @@ function AutoAssignPanel({ batchId }: { batchId: string }) {
   const queryClient = useQueryClient()
   const [productionIds, setProductionIds] = useState<string[]>([])
   const [validationIds, setValidationIds] = useState<string[]>([])
-  const [splitThreshold, setSplitThreshold] = useState(100)
-  const [splitChunkSize, setSplitChunkSize] = useState(25)
-  const [showAdvanced, setShowAdvanced] = useState(false)
-  const [manualCap, setManualCap] = useState<number | null>(null)
   const [error, setError] = useState('')
 
   const { data: membersData } = useQuery({
@@ -477,9 +473,6 @@ function AutoAssignPanel({ batchId }: { batchId: string }) {
         batch_id: batchId,
         production_user_ids: productionIds,
         validation_user_ids: validationIds,
-        batch_size_per_production_user: manualCap || undefined,
-        split_threshold: splitThreshold,
-        split_chunk_size: splitChunkSize,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
@@ -496,23 +489,23 @@ function AutoAssignPanel({ batchId }: { batchId: string }) {
   return (
     <div className="mt-4 border-t border-gray-100 pt-4">
       <h3 className="font-medium text-gray-900">Auto Assign</h3>
-      <p className="text-xs text-gray-500 mt-1">Select production and validation users. Pages are distributed equally across selected users.</p>
+      <p className="text-xs text-gray-500 mt-1">Files are distributed by workload (pages/rows). Workers with fewer active units across all jobs receive more files.</p>
       {error && <Alert type="error" message={error} />}
 
       {(totalPages > 0 || pendingCount > 0) && (
         <div className="mt-3 flex flex-wrap gap-3">
           <div className="bg-blue-50 rounded-md px-3 py-1.5">
-            <p className="text-[10px] font-medium text-blue-600 uppercase tracking-wide">Total pages</p>
+            <p className="text-[10px] font-medium text-blue-600 uppercase tracking-wide">Total units</p>
             <p className="text-sm font-semibold text-blue-900">{totalPages}</p>
           </div>
           <div className="bg-amber-50 rounded-md px-3 py-1.5">
-            <p className="text-[10px] font-medium text-amber-600 uppercase tracking-wide">Pending pages</p>
+            <p className="text-[10px] font-medium text-amber-600 uppercase tracking-wide">Pending units</p>
             <p className="text-sm font-semibold text-amber-900">{pendingPages}</p>
           </div>
           {productionIds.length > 0 && (
             <div className="bg-green-50 rounded-md px-3 py-1.5">
-              <p className="text-[10px] font-medium text-green-600 uppercase tracking-wide">Per user</p>
-              <p className="text-sm font-semibold text-green-900">~{pagesPerUser} pages</p>
+              <p className="text-[10px] font-medium text-green-600 uppercase tracking-wide">~Per user</p>
+              <p className="text-sm font-semibold text-green-900">~{pagesPerUser} units</p>
             </div>
           )}
         </div>
@@ -542,39 +535,6 @@ function AutoAssignPanel({ batchId }: { batchId: string }) {
           </div>
         </div>
       </div>
-
-      <div className="mt-3">
-        <button type="button" className="text-xs text-gray-500 hover:text-gray-700" onClick={() => setShowAdvanced(!showAdvanced)}>
-          {showAdvanced ? 'Hide' : 'Show'} advanced settings
-        </button>
-      </div>
-
-      {showAdvanced && (
-        <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50 rounded-md p-3">
-          <div>
-            <label className="text-xs font-medium text-gray-600">Max pages per user (override)</label>
-            <input
-              type="number"
-              className="input mt-1"
-              min={1}
-              value={manualCap ?? ''}
-              placeholder="Auto"
-              onChange={(e) => setManualCap(e.target.value ? Math.max(1, Number(e.target.value)) : null)}
-            />
-            <p className="text-[11px] text-gray-400 mt-0.5">Leave blank to distribute equally</p>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Split threshold</label>
-            <input type="number" className="input mt-1" min={1} value={splitThreshold} onChange={(e) => setSplitThreshold(Math.max(1, Number(e.target.value)))} />
-            <p className="text-[11px] text-gray-400 mt-0.5">Files above this page/row count get split</p>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600">Chunk size</label>
-            <input type="number" className="input mt-1" min={1} value={splitChunkSize} onChange={(e) => setSplitChunkSize(Math.max(1, Number(e.target.value)))} />
-            <p className="text-[11px] text-gray-400 mt-0.5">Pages/rows per chunk when splitting</p>
-          </div>
-        </div>
-      )}
 
       <div className="mt-4">
         <button
@@ -749,11 +709,7 @@ function UnitRow({
   canManage: boolean
 }) {
   const [assignOpen, setAssignOpen] = useState(false)
-  const prodMember = members.find((m: any) => m.user_id === unit.production_user_id)
   const isPending = unit.status === 'pending'
-
-  const collaborators = unit.collaborators || []
-  const isSharedFile = collaborators.length > 1
 
   return (
     <div className="rounded-lg border border-gray-100 p-3">
@@ -761,14 +717,8 @@ function UnitRow({
         <div>
           <p className="text-sm font-medium text-gray-900">{unit.file_name}</p>
           <p className="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
-            <span>{unit.unit_start || unit.unit_end ? `Pages ${unit.unit_start || '?'} - ${unit.unit_end || '?'}` : 'Whole file'}</span>
-            <span className="text-gray-400">({unit.unit_count || 1} {(unit.unit_count || 1) === 1 ? 'page' : 'pages'})</span>
-            {isSharedFile && (
-              <span className="bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-md text-[10px] font-medium uppercase tracking-wide flex items-center gap-1">
-                <Users className="w-3 h-3" />
-                Team file
-              </span>
-            )}
+            <span>Whole file</span>
+            <span className="text-gray-400">({unit.unit_count || 1} {(unit.unit_count || 1) === 1 ? 'unit' : 'units'})</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -786,28 +736,6 @@ function UnitRow({
           )}
         </div>
       </div>
-      {isSharedFile && (
-        <div className="mt-2 bg-gray-50 rounded-md p-2">
-          <p className="text-[11px] font-medium text-gray-600 mb-1">Collaborators on this file</p>
-          <div className="flex flex-wrap gap-1.5">
-            {collaborators.map((c: any) => (
-              <span
-                key={c.id}
-                className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium ${
-                  c.id === unit.production_user_id
-                    ? 'bg-blue-100 text-blue-800'
-                    : 'bg-gray-200 text-gray-700'
-                }`}
-              >
-                {c.name}
-                {c.chunks?.length > 0 && (
-                  <span className="text-[9px] ml-1 opacity-70">({c.chunks.join(', ')})</span>
-                )}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
       {assignOpen && (
         <ManualAssignModal
           unit={unit}

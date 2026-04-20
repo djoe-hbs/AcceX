@@ -134,9 +134,6 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
             production_users=validated["production_users"],
             validation_users=validated["validation_users"],
             assigned_by=request.user,
-            batch_size_per_production_user=validated["batch_size_per_production_user"],
-            split_threshold=validated["split_threshold"],
-            split_chunk_size=validated["split_chunk_size"],
         )
 
         return Response({"assigned_count": assigned_count}, status=status.HTTP_200_OK)

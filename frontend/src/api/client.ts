@@ -343,9 +343,6 @@ export const jobsApi = {
       batch_id: string
       production_user_ids: string[]
       validation_user_ids: string[]
-      batch_size_per_production_user?: number
-      split_threshold?: number
-      split_chunk_size?: number
     }
   ) => api.post('/work/unit/auto-assign/', data),
   downloadCompleted: (id: string) => downloadUnitFile(`/work/batch/${id}/download-completed/`),
