@@ -17,6 +17,7 @@ import ReworkHistoryPage from '@/pages/sme/ReworkHistoryPage'
 import FeedbackPage from '@/pages/jobs/FeedbackPage'
 import AnalyticsPage from '@/pages/analytics/AnalyticsPage'
 import ReportsPage from '@/pages/reports/ReportsPage'
+import ChatPage from '@/pages/chat/ChatPage'
 import { PageLoader } from '@/components/shared'
 
 const queryClient = new QueryClient({
@@ -62,6 +63,7 @@ function AppRoutes() {
       <Route path="/analytics" element={<ProtectedRoute roles={['superadmin','admin']}><AnalyticsPage /></ProtectedRoute>} />
       <Route path="/reports" element={<ProtectedRoute roles={['superadmin','admin','production','validation']}><ReportsPage /></ProtectedRoute>} />
       <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
+      <Route path="/chat" element={<ProtectedRoute roles={['sme','production','validation']}><ChatPage /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />

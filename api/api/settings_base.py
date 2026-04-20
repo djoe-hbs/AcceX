@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'core.auth',
     'core.client',
     'core.work',
+    'core.chat',
 ]
 
 MIDDLEWARE = [
@@ -151,3 +152,4 @@ DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "noreply
 
 WORK_INVOICE_DAY_OF_MONTH = int(os.getenv("WORK_INVOICE_DAY_OF_MONTH", "25"))
 WORK_INVOICE_EMAIL_ENABLED = env_bool("WORK_INVOICE_EMAIL_ENABLED", True)
+WORK_NOTIFICATION_EMAIL_ENABLED = env_bool("WORK_NOTIFICATION_EMAIL_ENABLED", True)

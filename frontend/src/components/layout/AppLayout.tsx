@@ -1,10 +1,12 @@
 import { ReactNode, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@/store/auth'
+import { chatApi } from '@/api/client'
 import {
   LayoutDashboard, Users, Building2, Briefcase, FileText,
   Bell, LogOut, ChevronLeft, ChevronRight, Settings,
-  ClipboardCheck, Upload, BarChart3, FileBarChart
+  ClipboardCheck, Upload, BarChart3, FileBarChart, MessageCircle
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
@@ -24,6 +26,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Users', href: '/users', icon: Users, roles: ['superadmin', 'admin'] },
   { label: 'Invoices', href: '/invoices', icon: FileText, roles: ['superadmin'] },
   { label: 'Analytics', href: '/analytics', icon: BarChart3, roles: ['superadmin', 'admin'] },
+  { label: 'Chat', href: '/chat', icon: MessageCircle, roles: ['sme', 'production', 'validation'] },
   { label: 'Reports', href: '/reports', icon: FileBarChart, roles: ['superadmin', 'admin', 'production', 'validation'] },
 ]
 
@@ -31,6 +34,15 @@ function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed
   const { user, logout, isRole } = useAuth()
   const location = useLocation()
   const visibleItems = NAV_ITEMS.filter((item) => isRole(...item.roles))
+
+  const chatEligible = isRole('sme', 'production', 'validation')
+  const { data: unreadData } = useQuery({
+    queryKey: ['chat-unread-count'],
+    queryFn: async () => (await chatApi.unreadCount()).data,
+    refetchInterval: 10000,
+    enabled: chatEligible,
+  })
+  const chatUnread = unreadData?.count || 0
 
   return (
     <aside className={clsx(
@@ -68,8 +80,24 @@ function Sidebar({ collapsed, setCollapsed }: { collapsed: boolean; setCollapsed
               )}
               title={collapsed ? item.label : undefined}
             >
-              <item.icon className="w-4 h-4 flex-shrink-0" />
-              {!collapsed && <span>{item.label}</span>}
+              <div className="relative">
+                <item.icon className="w-4 h-4 flex-shrink-0" />
+                {collapsed && item.label === 'Chat' && chatUnread > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-red-500 text-white text-[9px] rounded-full flex items-center justify-center">
+                    {chatUnread > 9 ? '9+' : chatUnread}
+                  </span>
+                )}
+              </div>
+              {!collapsed && (
+                <span className="flex items-center gap-2">
+                  {item.label}
+                  {item.label === 'Chat' && chatUnread > 0 && (
+                    <span className="w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
+                      {chatUnread > 9 ? '9+' : chatUnread}
+                    </span>
+                  )}
+                </span>
+              )}
             </Link>
           )
         })}

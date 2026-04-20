@@ -10,6 +10,11 @@ from django.utils import timezone
 
 from core.work.models import WorkBatch, WorkDeliveryPackage, WorkClientReview, WorkFile, WorkUnit, WorkUnitAssignment
 from core.work.services.assignment_engine import unassign_unit, close_active_assignments
+from core.work.services.notification_engine import (
+    notify_client_rework_requested,
+    notify_units_for_client_rework,
+    notify_batch_signed_off,
+)
 
 
 def _resolve_source_file_path(batch: WorkBatch, work_file: WorkFile):
@@ -113,6 +118,7 @@ def apply_client_review(batch: WorkBatch, review_file, review_note, uploaded_by)
         batch.delivery_status = WorkBatch.DeliveryStatus.REWORK_REQUESTED
         batch.save(update_fields=["delivery_status", "updated"])
 
+    notify_client_rework_requested(batch, review)
     return review
 
 
@@ -156,6 +162,10 @@ def send_units_for_client_rework(unit_assignments, assigned_by, reason="Client r
                 reason=reason,
             )
 
+    if unit_assignments:
+        batch = unit_assignments[0][0].batch
+        notify_units_for_client_rework(unit_assignments, batch)
+
 
 def mark_batch_signed_off(batch: WorkBatch, signed_off: bool):
     batch.delivery_status = (
@@ -164,4 +174,8 @@ def mark_batch_signed_off(batch: WorkBatch, signed_off: bool):
         else WorkBatch.DeliveryStatus.CLIENT_REVIEW_PENDING
     )
     batch.save(update_fields=["delivery_status", "updated"])
+
+    if signed_off:
+        notify_batch_signed_off(batch)
+
     return batch

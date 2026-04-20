@@ -13,6 +13,14 @@ from core.work.models import (
     WorkUnitAssignment,
     WorkUnitAlert,
 )
+from core.work.services.notification_engine import (
+    notify_work_assigned,
+    notify_production_submitted,
+    notify_validation_approved,
+    notify_sent_for_redo,
+    notify_batch_completed,
+    notify_reassignment,
+)
 
 
 def _get_cross_job_workloads(production_users):
@@ -122,6 +130,8 @@ def assign_unit(unit: WorkUnit, production_user, validation_user, assigned_by, r
         is_active=True,
         reason=reason,
     )
+
+    notify_work_assigned(unit, production_user, validation_user)
 
 
 def unassign_unit(unit: WorkUnit, reason=None):
@@ -254,6 +264,8 @@ def submit_to_validation(unit: WorkUnit):
     unit.production_submitted_at = timezone.now()
     unit.save(update_fields=["status", "production_submitted_at", "updated"])
 
+    notify_production_submitted(unit)
+
 
 def complete_validation(unit: WorkUnit, feedback=""):
     close_active_assignments(unit, WorkUnitAssignment.Stage.VALIDATION)
@@ -261,6 +273,8 @@ def complete_validation(unit: WorkUnit, feedback=""):
     unit.validation_completed_at = timezone.now()
     unit.validator_feedback = feedback or None
     unit.save(update_fields=["status", "validation_completed_at", "validator_feedback", "updated"])
+
+    notify_validation_approved(unit)
 
     # Check if all units in the batch are now completed — if so, mark batch COMPLETED.
     batch = unit.batch
@@ -274,6 +288,7 @@ def complete_validation(unit: WorkUnit, feedback=""):
             batch.delivery_status = WorkBatch.DeliveryStatus.CLIENT_REVIEW_PENDING
             update_fields.append("delivery_status")
         batch.save(update_fields=update_fields)
+        notify_batch_completed(batch)
 
 
 def send_back_for_redo(unit: WorkUnit, reason: str, assigned_by, report_file=None):
@@ -300,6 +315,8 @@ def send_back_for_redo(unit: WorkUnit, reason: str, assigned_by, report_file=Non
         is_active=True,
         reason="Redo requested by validator.",
     )
+
+    notify_sent_for_redo(unit, reason)
 
 
 def reassign_production_user(unit: WorkUnit, new_user, assigned_by, reason=None):
@@ -329,6 +346,8 @@ def reassign_production_user(unit: WorkUnit, new_user, assigned_by, reason=None)
         is_active=True,
         reason=reason,
     )
+
+    notify_reassignment(unit, new_user)
 
 
 def create_issue_alert(unit: WorkUnit, message: str, reported_by):

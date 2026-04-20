@@ -466,6 +466,33 @@ export const analyticsApi = {
   },
 }
 
+export const chatApi = {
+  threads: async () => {
+    const response = await api.get('/chat/thread/')
+    return { data: extractListData(response.data) }
+  },
+  createThread: async (recipientId: string) => {
+    const response = await api.post('/chat/thread/', { recipient_id: recipientId })
+    return { data: response.data }
+  },
+  messages: async (threadId: string) => {
+    const response = await api.get(`/chat/thread/${threadId}/messages/`)
+    return { data: extractListData(response.data) }
+  },
+  sendMessage: async (threadId: string, body: string) => {
+    const response = await api.post(`/chat/thread/${threadId}/messages/`, { body })
+    return { data: response.data }
+  },
+  eligibleUsers: async () => {
+    const response = await api.get('/chat/thread/eligible-users/')
+    return { data: extractListData(response.data) }
+  },
+  unreadCount: async () => {
+    const response = await api.get('/chat/thread/unread-count/')
+    return { data: response.data }
+  },
+}
+
 export const notifApi = {
   list: async (_unreadOnly?: boolean) => ({ data: [] as any[] }),
 }
