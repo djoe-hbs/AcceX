@@ -107,8 +107,8 @@ export default function ChunkProgressPage() {
                 {unit.unit_start || unit.unit_end ? `${unit.unit_start || '?'} - ${unit.unit_end || '?'}` : 'Whole file'}
               </td>
               <td className="table-td"><ChunkStatusBadge status={unit.status} /></td>
-              <td className="table-td text-gray-600">{unit.production_user_id || 'Unassigned'}</td>
-              <td className="table-td text-gray-600">{unit.validation_user_id || 'Unassigned'}</td>
+              <td className="table-td text-gray-600">{unit.production_user_name || 'Unassigned'}</td>
+              <td className="table-td text-gray-600">{unit.validation_user_name || 'Unassigned'}</td>
               <td className="table-td">
                 {(unit.status === 'assigned' || unit.status === 'redo') && (
                   <button

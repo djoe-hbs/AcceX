@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { jobsApi, usersApi, chunksApi, clientsApi } from '@/api/client'
@@ -13,7 +13,7 @@ import {
 } from '@/components/shared'
 import { FileTreeViewer } from '@/components/shared/FileTree'
 import { useAuth } from '@/store/auth'
-import { CheckCircle, ChevronRight, Download, MessageSquare, Plus, Trash2, Upload, UserCheck, Users } from 'lucide-react'
+import { CheckCircle, ChevronDown, ChevronRight, Download, MessageSquare, Plus, Trash2, Upload, UserCheck } from 'lucide-react'
 
 export function JobsListPage() {
   const { isRole } = useAuth()
@@ -220,47 +220,12 @@ export function JobDetailPage() {
     refetchInterval: 15000,
   })
 
-  const [unitsPages, setUnitsPages] = useState<any[]>([])
-  const loadedPageRef = useRef(1)
-  const [unitsHasMore, setUnitsHasMore] = useState(false)
-  const [unitsTotalCount, setUnitsTotalCount] = useState(0)
-  const [unitsLoadingMore, setUnitsLoadingMore] = useState(false)
-
-  const { isLoading: unitsLoading } = useQuery({
-    queryKey: ['job-units', id, 'page-1'],
-    queryFn: async () => {
-      // On refetch, reload all pages that were previously loaded
-      const pagesToLoad = loadedPageRef.current
-      const allItems: any[] = []
-      let lastRes: any = null
-      for (let p = 1; p <= pagesToLoad; p++) {
-        const res = await chunksApi.byBatchPaged(id || '', p)
-        allItems.push(...res.data)
-        lastRes = res
-        if (!res.next) break
-      }
-      setUnitsPages(allItems)
-      setUnitsHasMore(Boolean(lastRes?.next))
-      setUnitsTotalCount(lastRes?.count ?? 0)
-      return lastRes
-    },
+  const { data: unitsData, isLoading: unitsLoading } = useQuery({
+    queryKey: ['job-units', id],
+    queryFn: () => chunksApi.byBatch(id || ''),
     enabled: Boolean(id),
     refetchInterval: 15000,
   })
-
-  const loadMoreUnits = useCallback(async () => {
-    if (!id || unitsLoadingMore) return
-    setUnitsLoadingMore(true)
-    try {
-      const nextPage = loadedPageRef.current + 1
-      const res = await chunksApi.byBatchPaged(id, nextPage)
-      setUnitsPages((prev) => [...prev, ...res.data])
-      setUnitsHasMore(Boolean(res.next))
-      loadedPageRef.current = nextPage
-    } finally {
-      setUnitsLoadingMore(false)
-    }
-  }, [id, unitsLoadingMore])
 
   if (jobLoading || filesLoading || membersLoading || unitsLoading) {
     return <PageLoader />
@@ -273,7 +238,7 @@ export function JobDetailPage() {
   const job = jobData?.data
   const files = filesData?.data || []
   const members = membersData?.data || []
-  const units = unitsPages
+  const units = unitsData?.data || []
 
   const showAutoAssign = units.length === 0 || units.some((u: any) => u.status === 'pending')
 
@@ -354,7 +319,6 @@ export function JobDetailPage() {
           <div className="card">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-semibold text-gray-900">Batch Members</h2>
-              {isRole('sme') && id && <ManageMembers batchId={id} existingMembers={members} />}
             </div>
             <div className="space-y-3">
               {members.map((member: any) => (
@@ -379,12 +343,8 @@ export function JobDetailPage() {
               members={members}
               batchId={id || ''}
               canManage={Boolean(isRole('sme') && id)}
-              hasMore={unitsHasMore}
-              loadingMore={unitsLoadingMore}
-              onLoadMore={loadMoreUnits}
-              totalCount={unitsTotalCount}
             />
-            {isRole('sme') && id && showAutoAssign && <AutoAssignPanel batchId={id} />}
+            {isRole('sme') && id && showAutoAssign && <AutoAssignPanel batchId={id} units={units} />}
           </div>
         </div>
       </div>
@@ -419,74 +379,72 @@ function ChunkStatusPill({ status }: { status: string }) {
   return <Badge variant={status === 'completed' ? 'green' : status === 'in_validation' ? 'yellow' : 'blue'}>{status.replace('_', ' ')}</Badge>
 }
 
-function ManageMembers({ batchId, existingMembers }: { batchId: string; existingMembers: any[] }) {
-  const queryClient = useQueryClient()
+function MultiSelectDropdown({
+  options,
+  selected,
+  onChange,
+  placeholder,
+  openUpward = false,
+}: {
+  options: { id: string; name: string }[]
+  selected: string[]
+  onChange: (ids: string[]) => void
+  placeholder: string
+  openUpward?: boolean
+}) {
   const [open, setOpen] = useState(false)
-  const [selectedUserId, setSelectedUserId] = useState('')
-  const [selectedRole, setSelectedRole] = useState<'PRODUCTION' | 'VALIDATION'>('PRODUCTION')
-  const [error, setError] = useState('')
+  const label =
+    selected.length === 0
+      ? placeholder
+      : options
+          .filter((o) => selected.includes(o.id))
+          .map((o) => o.name)
+          .join(', ')
 
-  const { data: usersData } = useQuery({
-    queryKey: ['assignable-users', 'available'],
-    queryFn: () => usersApi.list({ available: true }),
-  })
-
-  const users = useMemo(() => {
-    return (usersData?.data || []).filter((user: any) => {
-      const matchRole = selectedRole === 'PRODUCTION' ? user.role === 'production' : user.role === 'validation'
-      const isExisting = existingMembers.some((m: any) => m.user_id === user.id && m.role === selectedRole)
-      return matchRole && !isExisting
-    })
-  }, [selectedRole, usersData?.data, existingMembers])
-
-  const addMutation = useMutation({
-    mutationFn: () => jobsApi.addMember(batchId, { user_id: selectedUserId, role: selectedRole }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['job-members', batchId] })
-      setSelectedUserId('')
-      setOpen(false)
-    },
-    onError: (err: any) => setError(err.response?.data?.detail || 'Unable to add member.'),
-  })
+  const listPosition = openUpward
+    ? 'bottom-full mb-1'
+    : 'top-full mt-1'
 
   return (
-    <>
-      <button className="btn-secondary text-sm" onClick={() => setOpen(true)}>
-        <Users className="w-4 h-4" />
-        Add Member
+    <div className="relative">
+      <button
+        type="button"
+        className="input w-full text-left flex items-center justify-between gap-2"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className={`truncate ${selected.length === 0 ? 'text-gray-400' : 'text-gray-900'}`}>{label}</span>
+        <ChevronDown className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Add Batch Member" size="sm">
-        <div className="space-y-4">
-          {error && <Alert type="error" message={error} />}
-          <div>
-            <label className="label">Role</label>
-            <select className="input" value={selectedRole} onChange={(e) => setSelectedRole(e.target.value as 'PRODUCTION' | 'VALIDATION')}>
-              <option value="PRODUCTION">Production</option>
-              <option value="VALIDATION">Validation</option>
-            </select>
-          </div>
-          <div>
-            <label className="label">User</label>
-            <select className="input" value={selectedUserId} onChange={(e) => setSelectedUserId(e.target.value)}>
-              <option value="">Select user</option>
-              {users.map((user: any) => (
-                <option key={user.id} value={user.id}>{user.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex justify-end gap-2">
-            <button className="btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
-            <button className="btn-primary" onClick={() => addMutation.mutate()} disabled={!selectedUserId || addMutation.isPending}>
-              {addMutation.isPending ? 'Saving...' : 'Add'}
-            </button>
-          </div>
+      {open && (
+        <div className={`absolute z-30 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-y-auto overscroll-contain ${listPosition}`} style={{ maxHeight: '12rem' }}>
+          {options.length === 0 ? (
+            <p className="text-sm text-gray-400 px-3 py-2">No users available</p>
+          ) : (
+            options.map((opt) => (
+              <label key={opt.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="flex-shrink-0"
+                  checked={selected.includes(opt.id)}
+                  onChange={() =>
+                    onChange(
+                      selected.includes(opt.id)
+                        ? selected.filter((id) => id !== opt.id)
+                        : [...selected, opt.id]
+                    )
+                  }
+                />
+                <span className="text-sm text-gray-700">{opt.name}</span>
+              </label>
+            ))
+          )}
         </div>
-      </Modal>
-    </>
+      )}
+    </div>
   )
 }
 
-function AutoAssignPanel({ batchId }: { batchId: string }) {
+function AutoAssignPanel({ batchId, units }: { batchId: string; units: any[] }) {
   const queryClient = useQueryClient()
   const [productionIds, setProductionIds] = useState<string[]>([])
   const [validationIds, setValidationIds] = useState<string[]>([])
@@ -497,47 +455,61 @@ function AutoAssignPanel({ batchId }: { batchId: string }) {
     queryFn: () => jobsApi.members(batchId),
   })
 
-  const { data: unitsData } = useQuery({
-    queryKey: ['job-units', batchId, 'page-1'],
-    queryFn: () => chunksApi.byBatchPaged(batchId, 1),
+  const { data: usersData } = useQuery({
+    queryKey: ['all-users'],
+    queryFn: () => usersApi.list(),
   })
 
-  const productionUsers = (membersData?.data || []).filter((m: any) => m.role === 'PRODUCTION' && m.is_active).map((m: any) => ({ id: m.user_id, name: m.user_name }))
-  const validationUsers = (membersData?.data || []).filter((m: any) => m.role === 'VALIDATION' && m.is_active).map((m: any) => ({ id: m.user_id, name: m.user_name }))
+  const existingMembers = membersData?.data || []
+  const allUsers = usersData?.data || []
 
-  const firstPageUnits = unitsData?.data || []
-  const totalUnitCount = unitsData?.count || 0
-  const pendingCount = firstPageUnits.filter((u: any) => u.status === 'pending').length
-  const totalPages = firstPageUnits.reduce((sum: number, u: any) => sum + (u.unit_count || 1), 0)
-  const pendingPages = firstPageUnits.filter((u: any) => u.status === 'pending').reduce((sum: number, u: any) => sum + (u.unit_count || 1), 0)
+  const productionUsers = allUsers
+    .filter((u: any) => u.role === 'production')
+    .map((u: any) => ({ id: u.id, name: u.name }))
+
+  const validationUsers = allUsers
+    .filter((u: any) => u.role === 'validation')
+    .map((u: any) => ({ id: u.id, name: u.name }))
+
+  const totalPages = units.reduce((sum: number, u: any) => sum + (u.unit_count || 1), 0)
+  const pendingPages = units
+    .filter((u: any) => u.status === 'pending')
+    .reduce((sum: number, u: any) => sum + (u.unit_count || 1), 0)
   const pagesPerUser = productionIds.length > 0 ? Math.ceil(pendingPages / productionIds.length) : 0
 
   const autoAssignMutation = useMutation({
-    mutationFn: () =>
-      jobsApi.autoAssign({
+    mutationFn: async () => {
+      for (const userId of productionIds) {
+        const already = existingMembers.some((m: any) => m.user_id === userId && m.role === 'PRODUCTION')
+        if (!already) await jobsApi.addMember(batchId, { user_id: userId, role: 'PRODUCTION' })
+      }
+      for (const userId of validationIds) {
+        const already = existingMembers.some((m: any) => m.user_id === userId && m.role === 'VALIDATION')
+        if (!already) await jobsApi.addMember(batchId, { user_id: userId, role: 'VALIDATION' })
+      }
+      await jobsApi.autoAssign({
         batch_id: batchId,
         production_user_ids: productionIds,
         validation_user_ids: validationIds,
-      }),
+      })
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['job-units', batchId, 'page-1'] })
+      queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
       queryClient.invalidateQueries({ queryKey: ['job-members', batchId] })
       setError('')
     },
     onError: (err: any) => setError(err.response?.data?.detail || 'Auto-assignment failed.'),
   })
 
-  const toggle = (value: string, current: string[], setState: (value: string[]) => void) => {
-    setState(current.includes(value) ? current.filter((item) => item !== value) : [...current, value])
-  }
-
   return (
     <div className="mt-4 border-t border-gray-100 pt-4">
       <h3 className="font-medium text-gray-900">Auto Assign</h3>
-      <p className="text-xs text-gray-500 mt-1">Files are distributed by workload (pages/rows). Workers with fewer active units across all jobs receive more files.</p>
+      <p className="text-xs text-gray-500 mt-1">
+        Select production and validation users. New selections will be added as members automatically before assignment.
+      </p>
       {error && <Alert type="error" message={error} />}
 
-      {(totalPages > 0 || pendingCount > 0) && (
+      {totalPages > 0 && (
         <div className="mt-3 flex flex-wrap gap-3">
           <div className="bg-blue-50 rounded-md px-3 py-1.5">
             <p className="text-[10px] font-medium text-blue-600 uppercase tracking-wide">Total units</p>
@@ -559,25 +531,23 @@ function AutoAssignPanel({ batchId }: { batchId: string }) {
       <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <p className="text-sm font-medium text-gray-800 mb-2">Production</p>
-          <div className="space-y-2">
-            {productionUsers.map((user: any) => (
-              <label key={user.id} className="flex items-center gap-2 text-sm text-gray-700">
-                <input type="checkbox" checked={productionIds.includes(user.id)} onChange={() => toggle(user.id, productionIds, setProductionIds)} />
-                <span>{user.name}</span>
-              </label>
-            ))}
-          </div>
+          <MultiSelectDropdown
+            options={productionUsers}
+            selected={productionIds}
+            onChange={setProductionIds}
+            placeholder="Select production users..."
+            openUpward
+          />
         </div>
         <div>
           <p className="text-sm font-medium text-gray-800 mb-2">Validation</p>
-          <div className="space-y-2">
-            {validationUsers.map((user: any) => (
-              <label key={user.id} className="flex items-center gap-2 text-sm text-gray-700">
-                <input type="checkbox" checked={validationIds.includes(user.id)} onChange={() => toggle(user.id, validationIds, setValidationIds)} />
-                <span>{user.name}</span>
-              </label>
-            ))}
-          </div>
+          <MultiSelectDropdown
+            options={validationUsers}
+            selected={validationIds}
+            onChange={setValidationIds}
+            placeholder="Select validation users..."
+            openUpward
+          />
         </div>
       </div>
 
@@ -604,7 +574,7 @@ function MemberRow({ member, batchId, canManage }: { member: any; batchId: strin
       jobsApi.removeMember(batchId, { user_id: member.user_id, role: member.role }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['job-members', batchId] })
-      queryClient.invalidateQueries({ queryKey: ['job-units', batchId, 'page-1'] })
+      queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
       queryClient.invalidateQueries({ queryKey: ['assignable-users', 'available'] })
       setShowConfirm(false)
     },
@@ -664,11 +634,12 @@ function MemberRow({ member, batchId, canManage }: { member: any; batchId: strin
   )
 }
 
-function AssignedFilesView({ units, members, batchId, canManage, hasMore, loadingMore, onLoadMore, totalCount }: { units: any[]; members: any[]; batchId: string; canManage: boolean; hasMore?: boolean; loadingMore?: boolean; onLoadMore?: () => void; totalCount?: number }) {
+function AssignedFilesView({ units, members, batchId, canManage }: { units: any[]; members: any[]; batchId: string; canManage: boolean }) {
+  const [visibleCount, setVisibleCount] = useState(1)
+
   const pendingUnits = units.filter((u: any) => u.status === 'pending')
   const assignedUnits = units.filter((u: any) => u.status !== 'pending')
 
-  // Group assigned units by production user
   const userGroups = useMemo(() => {
     const groups: Record<string, { user: any; units: any[]; totalPages: number }> = {}
     for (const unit of assignedUnits) {
@@ -687,9 +658,12 @@ function AssignedFilesView({ units, members, batchId, canManage, hasMore, loadin
     return <EmptyState title="No assigned files yet" description="Files appear here after auto-assignment is run." />
   }
 
+  const visibleGroups = userGroups.slice(0, visibleCount)
+  const hasMoreUsers = visibleCount < userGroups.length
+
   return (
-    <div className="space-y-4 max-h-[600px] overflow-y-auto pr-1">
-      {userGroups.map((group) => (
+    <div className="space-y-4">
+      {visibleGroups.map((group) => (
         <div key={group.user.user_id} className="rounded-lg border border-gray-200">
           <div className="flex items-center justify-between bg-gray-50 px-3 py-2 rounded-t-lg">
             <div className="flex items-center gap-2">
@@ -700,19 +674,22 @@ function AssignedFilesView({ units, members, batchId, canManage, hasMore, loadin
               {group.totalPages} {group.totalPages === 1 ? 'page' : 'pages'}
             </span>
           </div>
-          <div className="divide-y divide-gray-50">
+          <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
             {group.units.map((unit: any) => (
-              <UnitRow
-                key={unit.chunk_id}
-                unit={unit}
-                members={members}
-                batchId={batchId}
-                canManage={canManage}
-              />
+              <UnitRow key={unit.chunk_id} unit={unit} members={members} batchId={batchId} canManage={canManage} />
             ))}
           </div>
         </div>
       ))}
+
+      {hasMoreUsers && (
+        <button
+          className="btn-secondary text-sm w-full"
+          onClick={() => setVisibleCount((v) => v + 1)}
+        >
+          Load More ({visibleCount} of {userGroups.length} users)
+        </button>
+      )}
 
       {pendingUnits.length > 0 && (
         <div className="rounded-lg border border-dashed border-gray-300">
@@ -725,29 +702,11 @@ function AssignedFilesView({ units, members, batchId, canManage, hasMore, loadin
               {pendingUnits.reduce((sum: number, u: any) => sum + (u.unit_count || 1), 0)} pages
             </span>
           </div>
-          <div className="divide-y divide-gray-50">
+          <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
             {pendingUnits.map((unit: any) => (
-              <UnitRow
-                key={unit.chunk_id}
-                unit={unit}
-                members={members}
-                batchId={batchId}
-                canManage={canManage}
-              />
+              <UnitRow key={unit.chunk_id} unit={unit} members={members} batchId={batchId} canManage={canManage} />
             ))}
           </div>
-        </div>
-      )}
-
-      {hasMore && (
-        <div className="text-center pt-2">
-          <button
-            className="btn-secondary text-sm"
-            onClick={onLoadMore}
-            disabled={loadingMore}
-          >
-            {loadingMore ? 'Loading...' : `Load More (${units.length} of ${totalCount ?? '?'})`}
-          </button>
         </div>
       )}
     </div>
@@ -835,7 +794,7 @@ function ManualAssignModal({
         reason: 'Manual assignment by SME.',
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['job-units', batchId, 'page-1'] })
+      queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
       queryClient.invalidateQueries({ queryKey: ['assignable-users', 'available'] })
       onClose()
     },

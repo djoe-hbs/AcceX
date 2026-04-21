@@ -47,11 +47,6 @@ def _get_cross_job_workloads(production_users):
     return workloads
 
 
-def _pick_least_loaded(workloads, user_by_pk):
-    """Return the user with the minimum current workload."""
-    best_pk = min(workloads, key=lambda pk: workloads[pk])
-    return user_by_pk[best_pk]
-
 
 def initialize_work_units(batch: WorkBatch):
     """Create one WorkUnit per eligible file (no splitting)."""
@@ -161,27 +156,33 @@ def auto_assign_units(
     **_kwargs,
 ):
     """
-    Greedy min-workload assignment.
+    LPT (Longest Processing Time first) assignment with file-count tie-breaking.
 
     1. Create one unit per file if units don't exist yet.
-    2. Get each worker's current cross-job workload.
-    3. For each pending unit, assign to the worker with the least total
-       workload, then add the unit's count to that worker's running total.
+    2. Sort pending units by workload_count DESC so the largest files are
+       distributed first — this is the key to near-equal page distribution.
+    3. For each unit assign to the production user whose (total_pages, file_count)
+       tuple is lowest, which:
+         • Minimises the maximum workload gap between users (primary sort).
+         • Prevents one user from accumulating many more files than others when
+           workloads happen to be tied (secondary sort).
+    4. Cycle through validation users independently.
     """
-    # ── Ensure units exist (one per file, no splitting) ──
     initialize_work_units(batch)
 
+    # Largest files first — LPT heuristic gives the most balanced page spread
     pending_units = list(
         WorkUnit.objects.filter(batch=batch, status=WorkUnit.Status.PENDING)
         .select_related("work_file")
-        .order_by("work_file__relative_path", "unit_number")
+        .order_by("-workload_count", "work_file__relative_path", "unit_number")
     )
 
     if not pending_units:
         return 0
 
-    # ── Live cross-job workloads ──
+    # Cross-job workloads so existing assignments are accounted for
     workloads = _get_cross_job_workloads(production_users)
+    file_counts = {u.pk: 0 for u in production_users}
     user_by_pk = {u.pk: u for u in production_users}
 
     validation_cycle = cycle(validation_users)
@@ -189,9 +190,17 @@ def auto_assign_units(
 
     with transaction.atomic():
         for unit in pending_units:
-            prod = _pick_least_loaded(workloads, user_by_pk)
+            # Primary key: total pages (balance workload)
+            # Secondary key: file count (prevent one user getting many more files)
+            # Tertiary key: pk (stable, deterministic tie-break)
+            best_pk = min(
+                workloads,
+                key=lambda pk: (workloads[pk], file_counts[pk], pk),
+            )
+            prod = user_by_pk[best_pk]
             assign_unit(unit, prod, next(validation_cycle), assigned_by)
-            workloads[prod.pk] += unit.workload_count
+            workloads[best_pk] += unit.workload_count
+            file_counts[best_pk] += 1
             total_assigned += 1
 
     return total_assigned

@@ -19,6 +19,8 @@ class ClientCostSerializer(serializers.ModelSerializer):
 
 class ClientSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(source="public_id", read_only=True, format="hex")
+    contact_name = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    contact_email = serializers.EmailField(max_length=255, required=False, allow_blank=True, default="")
     costs = ClientCostSerializer(many=True, required=False)
 
     class Meta:

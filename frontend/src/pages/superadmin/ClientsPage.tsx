@@ -112,7 +112,7 @@ function ClientModal({ client, onClose }: { client?: any; onClose: () => void })
     mutationFn: () => {
       const payload = {
         ...form,
-        costs: costs.filter((cost) => cost.unit_cost).map((cost) => ({ ...cost, unit_cost: Number(cost.unit_cost) })),
+        costs: costs.filter((cost) => cost.unit_cost !== '' && cost.unit_cost !== null && cost.unit_cost !== undefined).map((cost) => ({ ...cost, unit_cost: Number(cost.unit_cost) })),
       }
       return client ? clientsApi.update(client.id, payload) : clientsApi.create(payload)
     },
@@ -121,7 +121,15 @@ function ClientModal({ client, onClose }: { client?: any; onClose: () => void })
       onClose()
     },
     onError: (err: any) => {
-      setError(err.response?.data?.detail || 'Unable to save client.')
+      const data = err.response?.data
+      if (!data) { setError('Unable to save client.'); return }
+      if (data.detail) { setError(data.detail); return }
+      const messages = Object.entries(data)
+        .flatMap(([field, errs]) =>
+          Array.isArray(errs) ? errs.map((e) => `${field}: ${e}`) : [`${field}: ${errs}`]
+        )
+        .join('; ')
+      setError(messages || 'Unable to save client.')
     },
   })
 

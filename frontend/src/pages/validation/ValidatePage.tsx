@@ -85,7 +85,7 @@ export default function ValidatePage() {
                   <CheckCircle className="w-3.5 h-3.5" />
                   Approve
                 </button>
-                <button className="btn-danger py-1.5 text-xs" onClick={() => setSelectedRejectTask(task)}>
+                <button className="btn-danger py-1.5 text-xs" onClick={() => setSelectedRejectTask(task)} disabled={validateMutation.isPending}>
                   <XCircle className="w-3.5 h-3.5" />
                   Reject
                 </button>

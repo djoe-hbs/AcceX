@@ -253,6 +253,11 @@ export const authApi = {
       old_password: oldPassword,
       new_password: newPassword,
     }),
+  changeUserPassword: (targetUserId: string, newPassword: string) =>
+    api.post('/auth/password/change-password/', {
+      target_user_id: targetUserId,
+      new_password: newPassword,
+    }),
 }
 
 export const usersApi = {
@@ -295,6 +300,7 @@ export const usersApi = {
     const response = await api.patch(`/user/${id}/`, data)
     return { ...response, data: mapUser(response.data) }
   },
+  delete: (id: string) => api.delete(`/user/${id}/`),
 }
 
 export const clientsApi = {

@@ -9,7 +9,7 @@ from rest_framework.exceptions import NotFound, PermissionDenied
 
 from core.user.models import User
 from core.user.serializers import UserSerializer
-from core.permissions import is_sme
+from core.permissions import is_sme, is_superadmin, is_admin
 from core.work.models import WorkUnit
 
 
@@ -77,3 +77,23 @@ class UserViewSet(viewsets.ModelViewSet):
             raise NotFound("User does not exist.")
 
         return obj
+
+    def _check_manage_permission(self, target_user):
+        actor = self.request.user
+        if is_superadmin(actor):
+            return  # superadmin can manage anyone
+        if is_admin(actor):
+            if is_superadmin(target_user):
+                raise PermissionDenied("Admins cannot manage superadmin accounts.")
+            return  # admin can manage all non-superadmin users
+        raise PermissionDenied("Only superadmin or admin can perform this action.")
+
+    def partial_update(self, request, *args, **kwargs):
+        target = self.get_object()
+        self._check_manage_permission(target)
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        target = self.get_object()
+        self._check_manage_permission(target)
+        return super().destroy(request, *args, **kwargs)
