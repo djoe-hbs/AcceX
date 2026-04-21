@@ -103,11 +103,11 @@ def calculate_or_update_file_billing(work_file: WorkFile, completed_at=None, for
     return billing
 
 
-def backfill_batch_file_billings(batch):
+def backfill_batch_file_billings(batch, force=False):
     created_or_updated = 0
 
     for work_file in batch.files.filter(is_directory=False).exclude(file_type=WorkFile.FileType.ZIP):
-        billing = calculate_or_update_file_billing(work_file=work_file, force=False)
+        billing = calculate_or_update_file_billing(work_file=work_file, force=force)
         if billing:
             created_or_updated += 1
 

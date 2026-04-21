@@ -9,10 +9,11 @@ class WorkUnitSerializer(serializers.ModelSerializer):
     batch_id = serializers.UUIDField(source="batch.public_id", read_only=True, format="hex")
     work_file_id = serializers.UUIDField(source="work_file.public_id", read_only=True, format="hex")
     work_file_path = serializers.CharField(source="work_file.relative_path", read_only=True)
-    production_user_id = serializers.UUIDField(source="current_production_assignee.public_id", read_only=True, format="hex")
-    validation_user_id = serializers.UUIDField(source="current_validation_assignee.public_id", read_only=True, format="hex")
+    production_user_id = serializers.UUIDField(source="current_production_assignee.public_id", read_only=True, format="hex", allow_null=True, default=None)
+    validation_user_id = serializers.UUIDField(source="current_validation_assignee.public_id", read_only=True, format="hex", allow_null=True, default=None)
     batch_name = serializers.CharField(source="batch.name", read_only=True)
     production_user_name = serializers.CharField(source="current_production_assignee.name", read_only=True, default=None)
+    validation_user_name = serializers.CharField(source="current_validation_assignee.name", read_only=True, default=None)
     production_output = serializers.FileField(read_only=True)
     redo_report_file = serializers.FileField(read_only=True)
 
@@ -21,7 +22,7 @@ class WorkUnitSerializer(serializers.ModelSerializer):
         fields = [
             "id", "batch_id", "batch_name", "work_file_id", "work_file_path", "unit_number",
             "range_start", "range_end", "count_type", "workload_count",
-            "status", "production_user_id", "production_user_name", "validation_user_id", "redo_reason",
+            "status", "production_user_id", "production_user_name", "validation_user_id", "validation_user_name", "redo_reason",
             "production_output", "production_output_uploaded_at", "validator_feedback", "redo_report_file",
             "production_assigned_at", "production_submitted_at", "validation_completed_at",
             "created", "updated",

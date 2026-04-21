@@ -107,7 +107,7 @@ def generate_client_invoice(client: Client, year: int, month: int, generated_by=
         created__month=month,
     )
     for batch in batches:
-        backfill_batch_file_billings(batch)
+        backfill_batch_file_billings(batch, force=True)
 
     invoice, _ = WorkClientInvoice.objects.get_or_create(
         client=client,

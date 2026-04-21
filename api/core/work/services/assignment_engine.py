@@ -286,18 +286,20 @@ def complete_validation(unit: WorkUnit, feedback=""):
     notify_validation_approved(unit)
 
     # Check if all units in the batch are now completed — if so, mark batch COMPLETED.
-    batch = unit.batch
-    has_incomplete = WorkUnit.objects.filter(batch=batch).exclude(
-        status=WorkUnit.Status.COMPLETED
-    ).exists()
-    if not has_incomplete and batch.status != WorkBatch.Status.COMPLETED:
-        batch.status = WorkBatch.Status.COMPLETED
-        update_fields = ["status", "updated"]
-        if batch.delivery_status == WorkBatch.DeliveryStatus.REWORK_REQUESTED:
-            batch.delivery_status = WorkBatch.DeliveryStatus.CLIENT_REVIEW_PENDING
-            update_fields.append("delivery_status")
-        batch.save(update_fields=update_fields)
-        notify_batch_completed(batch)
+    # select_for_update prevents two concurrent validations both seeing has_incomplete=False.
+    with transaction.atomic():
+        batch = WorkBatch.objects.select_for_update().get(pk=unit.batch_id)
+        has_incomplete = WorkUnit.objects.filter(batch=batch).exclude(
+            status=WorkUnit.Status.COMPLETED
+        ).exists()
+        if not has_incomplete and batch.status != WorkBatch.Status.COMPLETED:
+            batch.status = WorkBatch.Status.COMPLETED
+            update_fields = ["status", "updated"]
+            if batch.delivery_status == WorkBatch.DeliveryStatus.REWORK_REQUESTED:
+                batch.delivery_status = WorkBatch.DeliveryStatus.CLIENT_REVIEW_PENDING
+                update_fields.append("delivery_status")
+            batch.save(update_fields=update_fields)
+            notify_batch_completed(batch)
 
 
 def send_back_for_redo(unit: WorkUnit, reason: str, assigned_by, report_file=None):
