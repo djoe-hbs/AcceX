@@ -478,17 +478,21 @@ export const analyticsApi = {
 }
 
 export const chatApi = {
-  threads: async () => {
-    const response = await api.get('/chat/thread/')
-    return { data: extractListData(response.data) }
+  threadsPaged: async (page = 1) => {
+    const response = await api.get(`/chat/thread/?page=${page}`)
+    const payload = response.data
+    const results = Array.isArray(payload?.results) ? payload.results : Array.isArray(payload) ? payload : []
+    return { data: results, count: payload?.count ?? results.length, next: payload?.next ?? null }
   },
   createThread: async (recipientId: string) => {
     const response = await api.post('/chat/thread/', { recipient_id: recipientId })
     return { data: response.data }
   },
-  messages: async (threadId: string) => {
-    const response = await api.get(`/chat/thread/${threadId}/messages/`)
-    return { data: extractListData(response.data) }
+  messagesPaged: async (threadId: string, page = 1) => {
+    const response = await api.get(`/chat/thread/${threadId}/messages/?page=${page}`)
+    const payload = response.data
+    const results = Array.isArray(payload?.results) ? payload.results : Array.isArray(payload) ? payload : []
+    return { data: results, count: payload?.count ?? results.length, next: payload?.next ?? null }
   },
   sendMessage: async (threadId: string, body: string) => {
     const response = await api.post(`/chat/thread/${threadId}/messages/`, { body })

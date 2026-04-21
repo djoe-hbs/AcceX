@@ -1,7 +1,6 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { chatApi } from '@/api/client'
-import { useAuth } from '@/store/auth'
 import { Send, Plus, ArrowLeft, MessageCircle, Search } from 'lucide-react'
 import { clsx } from 'clsx'
 
@@ -36,18 +35,52 @@ function roleLabel(role: string) {
 }
 
 export default function ChatPage() {
-  const { user } = useAuth()
   const queryClient = useQueryClient()
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [showNewChat, setShowNewChat] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [mobileShowMessages, setMobileShowMessages] = useState(false)
 
-  const { data: threads = [] } = useQuery({
-    queryKey: ['chat-threads'],
-    queryFn: async () => (await chatApi.threads()).data,
+  // ── Thread list pagination ──
+  const [threads, setThreads] = useState<any[]>([])
+  const threadLoadedPageRef = useRef(1)
+  const [threadsHasMore, setThreadsHasMore] = useState(false)
+  const [threadsTotalCount, setThreadsTotalCount] = useState(0)
+  const [threadsLoadingMore, setThreadsLoadingMore] = useState(false)
+
+  useQuery({
+    queryKey: ['chat-threads', 'page-1'],
+    queryFn: async () => {
+      const pagesToLoad = threadLoadedPageRef.current
+      const all: any[] = []
+      let lastRes: any = null
+      for (let p = 1; p <= pagesToLoad; p++) {
+        const res = await chatApi.threadsPaged(p)
+        all.push(...res.data)
+        lastRes = res
+        if (!res.next) break
+      }
+      setThreads(all)
+      setThreadsHasMore(Boolean(lastRes?.next))
+      setThreadsTotalCount(lastRes?.count ?? 0)
+      return lastRes
+    },
     refetchInterval: 5000,
   })
+
+  const loadMoreThreads = useCallback(async () => {
+    if (threadsLoadingMore) return
+    setThreadsLoadingMore(true)
+    try {
+      const nextPage = threadLoadedPageRef.current + 1
+      const res = await chatApi.threadsPaged(nextPage)
+      setThreads((prev) => [...prev, ...res.data])
+      setThreadsHasMore(Boolean(res.next))
+      threadLoadedPageRef.current = nextPage
+    } finally {
+      setThreadsLoadingMore(false)
+    }
+  }, [threadsLoadingMore])
 
   const activeThread = threads.find((t: any) => t.id === activeThreadId)
 
@@ -65,7 +98,7 @@ export default function ChatPage() {
     setActiveThreadId(thread.id)
     setShowNewChat(false)
     setMobileShowMessages(true)
-    queryClient.invalidateQueries({ queryKey: ['chat-threads'] })
+    queryClient.invalidateQueries({ queryKey: ['chat-threads', 'page-1'] })
   }
 
   const filteredThreads = threads.filter((t: any) =>
@@ -81,7 +114,12 @@ export default function ChatPage() {
       )}>
         <div className="p-4 border-b border-gray-100">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold text-gray-900">Chat</h2>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Chat
+              {threadsTotalCount > 0 && (
+                <span className="ml-2 text-sm font-normal text-gray-400">({threadsTotalCount})</span>
+              )}
+            </h2>
             <button
               onClick={() => setShowNewChat(true)}
               className="p-2 rounded-lg hover:bg-gray-100 transition-colors text-blue-600"
@@ -148,6 +186,19 @@ export default function ChatPage() {
               </div>
             </button>
           ))}
+
+          {/* Load more threads */}
+          {threadsHasMore && !searchTerm && (
+            <div className="p-3 text-center">
+              <button
+                className="text-sm text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50"
+                onClick={loadMoreThreads}
+                disabled={threadsLoadingMore}
+              >
+                {threadsLoadingMore ? 'Loading...' : `Load more (${threads.length} of ${threadsTotalCount})`}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -259,26 +310,88 @@ function MessagePanel({
 }) {
   const [body, setBody] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
 
-  const { data: messages = [] } = useQuery({
-    queryKey: ['chat-messages', thread.id],
-    queryFn: async () => (await chatApi.messages(thread.id)).data,
+  // ── Message pagination state ──
+  // Backend returns newest-first; we reverse for display (oldest at top).
+  const [messages, setMessages] = useState<any[]>([])
+  const msgLoadedPageRef = useRef(1)
+  const [msgsHasMore, setMsgsHasMore] = useState(false)
+  const [msgsTotalCount, setMsgsTotalCount] = useState(0)
+  const [msgsLoadingOlder, setMsgsLoadingOlder] = useState(false)
+  // Track the newest message id we've seen so we only scroll on truly new messages
+  const latestMsgIdRef = useRef<string | null>(null)
+
+  // Page-1 query: newest 20 messages. On each poll tick, also re-fetch any
+  // additional pages already loaded so the user's expanded history stays fresh.
+  useQuery({
+    queryKey: ['chat-messages', thread.id, 'page-1'],
+    queryFn: async () => {
+      const pagesToLoad = msgLoadedPageRef.current
+      const all: any[] = []
+      let lastRes: any = null
+      for (let p = 1; p <= pagesToLoad; p++) {
+        const res = await chatApi.messagesPaged(thread.id, p)
+        all.push(...res.data)
+        lastRes = res
+        if (!res.next) break
+      }
+      // Backend returns newest-first per page; reverse the combined list so
+      // oldest message is at the top of the chat.
+      const ordered = [...all].reverse()
+      setMessages(ordered)
+      setMsgsHasMore(Boolean(lastRes?.next))
+      setMsgsTotalCount(lastRes?.count ?? 0)
+      return lastRes
+    },
     refetchInterval: 3000,
   })
+
+  // Scroll to bottom only when a new message arrives (latest id changes)
+  useEffect(() => {
+    if (messages.length === 0) return
+    const newestId = messages[messages.length - 1]?.id
+    if (newestId !== latestMsgIdRef.current) {
+      latestMsgIdRef.current = newestId
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [messages])
+
+  const loadOlderMessages = useCallback(async () => {
+    if (msgsLoadingOlder) return
+    setMsgsLoadingOlder(true)
+    // Remember scroll position so loading older msgs doesn't jump the view
+    const container = scrollContainerRef.current
+    const prevScrollHeight = container?.scrollHeight ?? 0
+    try {
+      const nextPage = msgLoadedPageRef.current + 1
+      const res = await chatApi.messagesPaged(thread.id, nextPage)
+      // Older messages come back newest-first within the page; reverse so they
+      // prepend correctly (oldest at top).
+      const olderOrdered = [...res.data].reverse()
+      setMessages((prev) => [...olderOrdered, ...prev])
+      setMsgsHasMore(Boolean(res.next))
+      msgLoadedPageRef.current = nextPage
+      // Restore scroll position after prepend
+      requestAnimationFrame(() => {
+        if (container) {
+          container.scrollTop = container.scrollHeight - prevScrollHeight
+        }
+      })
+    } finally {
+      setMsgsLoadingOlder(false)
+    }
+  }, [thread.id, msgsLoadingOlder])
 
   const sendMutation = useMutation({
     mutationFn: () => chatApi.sendMessage(thread.id, body),
     onSuccess: () => {
       setBody('')
-      queryClient.invalidateQueries({ queryKey: ['chat-messages', thread.id] })
-      queryClient.invalidateQueries({ queryKey: ['chat-threads'] })
+      queryClient.invalidateQueries({ queryKey: ['chat-messages', thread.id, 'page-1'] })
+      queryClient.invalidateQueries({ queryKey: ['chat-threads', 'page-1'] })
     },
   })
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
 
   function handleSend(e: React.FormEvent) {
     e.preventDefault()
@@ -306,15 +419,35 @@ function MessagePanel({
             {roleLabel(other?.role)}
           </span>
         </div>
+        {msgsTotalCount > 0 && (
+          <span className="ml-auto text-xs text-gray-400">{msgsTotalCount} messages</span>
+        )}
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50"
+      >
+        {/* Load older button at the top */}
+        {msgsHasMore && (
+          <div className="text-center pb-2">
+            <button
+              className="text-xs text-blue-600 hover:text-blue-700 font-medium bg-white border border-gray-200 rounded-full px-4 py-1.5 shadow-sm disabled:opacity-50"
+              onClick={loadOlderMessages}
+              disabled={msgsLoadingOlder}
+            >
+              {msgsLoadingOlder ? 'Loading...' : `Load older messages (${messages.length} of ${msgsTotalCount})`}
+            </button>
+          </div>
+        )}
+
         {messages.length === 0 && (
           <p className="text-center text-sm text-gray-400 mt-8">
             No messages yet. Say hello!
           </p>
         )}
+
         {messages.map((msg: any) => (
           <div
             key={msg.id}
