@@ -1,4 +1,5 @@
 import shutil
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -211,18 +212,26 @@ def _build_file_tree(batch: WorkBatch, extraction_root: Path):
 
 
 def process_work_batch(batch: WorkBatch):
-    source_path = Path(batch.source_archive.path)
-
-    extraction_root = Path(settings.MEDIA_ROOT) / "work" / "extracted" / batch.public_id.hex
+    extraction_root = Path(settings.WORK_EXTRACTION_ROOT) / batch.public_id.hex
     extraction_root.mkdir(parents=True, exist_ok=True)
 
     batch.status = WorkBatch.Status.PROCESSING
     batch.error_message = None
-    batch.extraction_root = str(extraction_root.relative_to(settings.MEDIA_ROOT))
+    batch.extraction_root = batch.public_id.hex
     batch.save(update_fields=["status", "error_message", "extraction_root", "updated"])
 
     try:
-        _safe_extract_zip(source_path, extraction_root)
+        # Download source archive to a local temp file (supports both local and S3 storage)
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+            with batch.source_archive.open("rb") as src:
+                shutil.copyfileobj(src, tmp)
+
+        try:
+            _safe_extract_zip(tmp_path, extraction_root)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
         _extract_nested_archives(extraction_root)
 
         with transaction.atomic():

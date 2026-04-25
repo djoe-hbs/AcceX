@@ -33,6 +33,7 @@ const JOB_STATUS_MAP: Record<string, { label: string; variant: BadgeVariant }> =
   completed: { label: 'Completed', variant: 'purple' },
   on_rework: { label: 'On Rework', variant: 'orange' },
   fully_completed: { label: 'Fully Completed', variant: 'green' },
+  inactive: { label: 'Inactive', variant: 'gray' },
 }
 
 const CHUNK_STATUS_MAP: Record<string, { label: string; variant: BadgeVariant }> = {

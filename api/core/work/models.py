@@ -1,9 +1,11 @@
 import uuid
 
 from django.db import models
+from storages.backends.s3boto3 import S3Boto3Storage
 
 from core.user.models import User
 from core.client.models import Client
+
 
 
 class WorkBatch(models.Model):
@@ -24,7 +26,7 @@ class WorkBatch(models.Model):
 
     name = models.CharField(max_length=255)
     client = models.ForeignKey(Client, on_delete=models.PROTECT, null=True, blank=True, related_name="work_batches")
-    source_archive = models.FileField(upload_to="work/source")
+    source_archive = models.FileField(upload_to="work/source", storage=S3Boto3Storage())
     extraction_root = models.CharField(max_length=512, blank=True, null=True)
 
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PROCESSING, db_index=True)
@@ -165,7 +167,7 @@ class WorkUnit(models.Model):
         related_name="assigned_work_units",
     )
 
-    production_output = models.FileField(upload_to="work/production_output", blank=True, null=True)
+    production_output = models.FileField(upload_to="work/production_output", blank=True, null=True, storage=S3Boto3Storage())
     production_output_uploaded_at = models.DateTimeField(blank=True, null=True)
     validator_feedback = models.TextField(blank=True, null=True)
 
@@ -174,7 +176,7 @@ class WorkUnit(models.Model):
     validation_completed_at = models.DateTimeField(blank=True, null=True)
 
     redo_reason = models.TextField(blank=True, null=True)
-    redo_report_file = models.FileField(upload_to="work/redo_reports", blank=True, null=True)
+    redo_report_file = models.FileField(upload_to="work/redo_reports", blank=True, null=True, storage=S3Boto3Storage())
 
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
@@ -336,7 +338,7 @@ class WorkDeliveryPackage(models.Model):
 
     batch = models.ForeignKey(WorkBatch, on_delete=models.CASCADE, related_name="delivery_packages")
     mode = models.CharField(max_length=24, choices=Mode.choices, db_index=True)
-    archive = models.FileField(upload_to="work/delivery")
+    archive = models.FileField(upload_to="work/delivery", storage=S3Boto3Storage())
     total_files = models.PositiveIntegerField(default=0)
 
     generated_by = models.ForeignKey(
@@ -355,7 +357,7 @@ class WorkClientReview(models.Model):
     public_id = models.UUIDField(db_index=True, unique=True, editable=False, default=uuid.uuid4)
 
     batch = models.ForeignKey(WorkBatch, on_delete=models.CASCADE, related_name="client_reviews")
-    review_file = models.FileField(upload_to="work/client_review")
+    review_file = models.FileField(upload_to="work/client_review", storage=S3Boto3Storage())
     review_note = models.TextField(blank=True, null=True)
 
     uploaded_by = models.ForeignKey(

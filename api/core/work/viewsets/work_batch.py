@@ -271,7 +271,7 @@ class WorkBatchViewSet(viewsets.ModelViewSet):
 
             # Fallback to the original source file from extraction
             if not source_path and batch.extraction_root:
-                root = (Path(settings.MEDIA_ROOT) / batch.extraction_root).resolve()
+                root = (Path(settings.WORK_EXTRACTION_ROOT) / batch.extraction_root).resolve()
                 candidate = (root / work_file.relative_path).resolve()
                 try:
                     candidate.relative_to(root)

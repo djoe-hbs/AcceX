@@ -16,6 +16,8 @@ class CreateUserViewSet(ViewSet):
         plain_password = request.data.get("password", "")
         serializer = self.serializer_class(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        from core.user.models import User
         user = serializer.save()
-        notify_user_created(user, plain_password)
+        if user.role in (User.Role.ADMIN, User.Role.SME, User.Role.PRODUCTION_USER, User.Role.VALIDATION_USER):
+            notify_user_created(user, plain_password)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
