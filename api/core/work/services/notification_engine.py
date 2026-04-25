@@ -32,6 +32,34 @@ def _unit_label(unit):
 # ── Event helpers ──
 
 
+_ROLE_DISPLAY = {
+    "SUPERADMIN": "Super Admin",
+    "ADMIN": "Admin",
+    "SME": "SME",
+    "PRODUCTION_USER": "Production User",
+    "VALIDATION_USER": "Validation User",
+}
+
+
+def notify_user_created(user, plain_password):
+    role_label = _ROLE_DISPLAY.get(user.role, user.role)
+    username_line = ""
+    _send(
+        subject="[AcceX] Your account has been created",
+        body=(
+            f"Hi {user.name},\n\n"
+            f"Your AcceX account has been created. Here are your login details:\n\n"
+            f"Email    : {user.email}\n"
+            f"{username_line}"
+            f"Password : {plain_password}\n"
+            f"Role     : {role_label}\n\n"
+            f"Please log in and change your password as soon as possible.\n\n"
+            f"AcceX Team\n"
+        ),
+        recipient_list=[user.email],
+    )
+
+
 def notify_work_assigned(unit, production_user, validation_user):
     label = _unit_label(unit)
     _send(

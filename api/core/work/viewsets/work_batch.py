@@ -45,7 +45,11 @@ class WorkBatchViewSet(viewsets.ModelViewSet):
         if not self._has_read_access():
             raise PermissionDenied("Only superadmin/admin/SME can access work batches.")
 
-        return WorkBatch.objects.prefetch_related("files", "members").order_by("-created")
+        qs = WorkBatch.objects.prefetch_related("files", "members").order_by("-created")
+        include_inactive = self.request.query_params.get("include_inactive", "").lower() == "true"
+        if not (include_inactive and can_manage_work_batches(self.request.user)):
+            qs = qs.exclude(status=WorkBatch.Status.INACTIVE)
+        return qs
 
     def get_object(self):
         if not self._has_read_access():
@@ -188,6 +192,24 @@ class WorkBatchViewSet(viewsets.ModelViewSet):
 
         updated_batch = mark_batch_signed_off(batch, serializer.validated_data["signed_off"])
         return Response(WorkBatchSerializer(updated_batch).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="deactivate")
+    def deactivate(self, request, pk=None):
+        if not can_manage_work_batches(request.user):
+            raise PermissionDenied("Only superadmin and admin can deactivate batches.")
+
+        try:
+            batch = WorkBatch.objects.prefetch_related("files", "members").get(public_id=pk)
+        except (WorkBatch.DoesNotExist, ValueError, TypeError):
+            raise NotFound("Work batch does not exist.")
+
+        if batch.status == WorkBatch.Status.INACTIVE:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError("Batch is already inactive.")
+
+        batch.status = WorkBatch.Status.INACTIVE
+        batch.save(update_fields=["status", "updated"])
+        return Response(WorkBatchSerializer(batch).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="mark-rework-complete")
     def mark_rework_complete(self, request, pk=None):

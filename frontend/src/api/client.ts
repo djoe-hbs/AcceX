@@ -20,6 +20,7 @@ const batchStatusMap: Record<string, string> = {
   READY: 'ready',
   FAILED: 'failed',
   COMPLETED: 'completed',
+  INACTIVE: 'inactive',
 }
 
 const unitStatusMap: Record<string, string> = {
@@ -369,6 +370,8 @@ export const jobsApi = {
     api.post(`/work/batch/${id}/sign-off/`, { signed_off: signedOff }),
   markReworkComplete: (id: string) =>
     api.post(`/work/batch/${id}/mark-rework-complete/`),
+  deactivate: (id: string) =>
+    api.post(`/work/batch/${id}/deactivate/`),
 }
 
 export const chunksApi = {

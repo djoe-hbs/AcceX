@@ -12,6 +12,7 @@ class WorkBatch(models.Model):
         READY = "READY"
         FAILED = "FAILED"
         COMPLETED = "COMPLETED"
+        INACTIVE = "INACTIVE"
 
     class DeliveryStatus(models.TextChoices):
         IN_PROGRESS = "IN_PROGRESS"

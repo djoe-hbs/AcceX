@@ -13,16 +13,26 @@ import {
 } from '@/components/shared'
 import { FileTreeViewer } from '@/components/shared/FileTree'
 import { useAuth } from '@/store/auth'
-import { CheckCircle, ChevronDown, ChevronRight, Download, MessageSquare, Plus, Trash2, Upload, UserCheck } from 'lucide-react'
+import { CheckCircle, ChevronDown, ChevronRight, Download, MessageSquare, Plus, PowerOff, Trash2, Upload, UserCheck } from 'lucide-react'
 
 export function JobsListPage() {
   const { isRole } = useAuth()
+  const queryClient = useQueryClient()
   const [showCreate, setShowCreate] = useState(false)
+  const [deactivateTarget, setDeactivateTarget] = useState<any>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['jobs'],
     queryFn: () => jobsApi.list(),
     refetchInterval: 15000,
+  })
+
+  const deactivateMutation = useMutation({
+    mutationFn: (jobId: string) => jobsApi.deactivate(jobId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+      setDeactivateTarget(null)
+    },
   })
 
   const jobs = data?.data || []
@@ -45,7 +55,7 @@ export function JobsListPage() {
       <div className="card p-0 overflow-hidden">
         <Table headers={['Job', 'Client', 'Files', 'Folders', 'Status', '']} loading={isLoading}>
           {jobs.map((job: any) => (
-            <tr key={job.id} className="hover:bg-gray-50">
+            <tr key={job.id} className={`hover:bg-gray-50 ${job.status === 'inactive' ? 'opacity-60' : ''}`}>
               <td className="table-td">
                 <p className="font-medium text-gray-900">{job.title}</p>
                 <p className="text-xs text-gray-500">{new Date(job.created_at).toLocaleString()}</p>
@@ -71,6 +81,18 @@ export function JobsListPage() {
                       Download
                     </button>
                   )}
+                  {job.status !== 'inactive' && isRole('superadmin', 'admin') && (
+                    <button
+                      className="text-red-500 hover:text-red-700 text-sm font-medium flex items-center gap-1"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setDeactivateTarget(job)
+                      }}
+                    >
+                      <PowerOff className="w-3.5 h-3.5" />
+                      Deactivate
+                    </button>
+                  )}
                 </div>
               </td>
             </tr>
@@ -86,6 +108,30 @@ export function JobsListPage() {
       </div>
 
       {showCreate && <CreateJobModal onClose={() => setShowCreate(false)} />}
+
+      {deactivateTarget && (
+        <Modal open onClose={() => setDeactivateTarget(null)} title="Deactivate Job" size="sm">
+          <div className="space-y-4">
+            {deactivateMutation.isError && (
+              <Alert type="error" message={(deactivateMutation.error as any)?.response?.data?.detail || 'Deactivation failed.'} />
+            )}
+            <p className="text-sm text-gray-700">
+              Are you sure you want to deactivate <strong>{deactivateTarget.title}</strong>? The job will be hidden from the default list but no data will be deleted.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button className="btn-secondary" onClick={() => setDeactivateTarget(null)}>Cancel</button>
+              <button
+                className="btn-primary !bg-red-600 !border-red-600 hover:!bg-red-700"
+                onClick={() => deactivateMutation.mutate(deactivateTarget.id)}
+                disabled={deactivateMutation.isPending}
+              >
+                <PowerOff className="w-4 h-4" />
+                {deactivateMutation.isPending ? 'Deactivating...' : 'Deactivate'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
@@ -181,6 +227,7 @@ export function JobDetailPage() {
   const queryClient = useQueryClient()
   const [downloading, setDownloading] = useState(false)
   const [showSignOff, setShowSignOff] = useState(false)
+  const [showDeactivate, setShowDeactivate] = useState(false)
 
   const signOffMutation = useMutation({
     mutationFn: () => jobsApi.signOff(id || '', true),
@@ -188,6 +235,15 @@ export function JobDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['job', id] })
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
       setShowSignOff(false)
+    },
+  })
+
+  const deactivateMutation = useMutation({
+    mutationFn: () => jobsApi.deactivate(id || ''),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['job', id] })
+      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+      setShowDeactivate(false)
     },
   })
 
@@ -301,6 +357,12 @@ export function JobDetailPage() {
               Sign Off
             </button>
           )}
+          {job?.status !== 'inactive' && isRole('superadmin', 'admin') && (
+            <button className="btn-secondary text-red-600 border-red-200 hover:bg-red-50" onClick={() => setShowDeactivate(true)}>
+              <PowerOff className="w-4 h-4" />
+              Deactivate
+            </button>
+          )}
         </div>
       </div>
 
@@ -367,6 +429,28 @@ export function JobDetailPage() {
             >
               <CheckCircle className="w-4 h-4" />
               {signOffMutation.isPending ? 'Signing off...' : 'Confirm Sign Off'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={showDeactivate} onClose={() => setShowDeactivate(false)} title="Deactivate Job" size="sm">
+        <div className="space-y-4">
+          {deactivateMutation.isError && (
+            <Alert type="error" message={(deactivateMutation.error as any)?.response?.data?.detail || 'Deactivation failed.'} />
+          )}
+          <p className="text-sm text-gray-700">
+            Are you sure you want to deactivate <strong>{job?.title}</strong>? The job will be hidden from the default list but no data will be deleted.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button className="btn-secondary" onClick={() => setShowDeactivate(false)}>Cancel</button>
+            <button
+              className="btn-primary !bg-red-600 !border-red-600 hover:!bg-red-700"
+              onClick={() => deactivateMutation.mutate()}
+              disabled={deactivateMutation.isPending}
+            >
+              <PowerOff className="w-4 h-4" />
+              {deactivateMutation.isPending ? 'Deactivating...' : 'Confirm Deactivate'}
             </button>
           </div>
         </div>

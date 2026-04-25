@@ -28,3 +28,4 @@ from .invoice_engine import (
     generate_monthly_client_invoices,
     send_client_invoice_email,
 )
+from .notification_engine import notify_user_created

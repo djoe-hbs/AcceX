@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
 from core.auth.serializers.create_user import CreateUserSerializer
+from core.work.services import notify_user_created
 
 
 class CreateUserViewSet(ViewSet):
@@ -12,7 +13,9 @@ class CreateUserViewSet(ViewSet):
     http_method_names = ["post"]
 
     def create(self, request, *args, **kwargs):
+        plain_password = request.data.get("password", "")
         serializer = self.serializer_class(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        user = serializer.save()
+        notify_user_created(user, plain_password)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
