@@ -1,7 +1,6 @@
 from datetime import timedelta
 from pathlib import Path
 
-from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import FileResponse
 from django.utils import timezone
@@ -98,23 +97,6 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
             return True
         return False
 
-    def _resolve_source_file_path(self, unit):
-        if not unit.batch.extraction_root:
-            raise NotFound("Batch extraction path not available.")
-
-        root = (Path(settings.WORK_EXTRACTION_ROOT) / unit.batch.extraction_root).resolve()
-        candidate = (root / unit.work_file.relative_path).resolve()
-
-        try:
-            candidate.relative_to(root)
-        except ValueError:
-            raise PermissionDenied("Invalid file path.")
-
-        if not candidate.exists() or not candidate.is_file():
-            raise NotFound("Source file not found.")
-
-        return candidate
-
     @action(detail=False, methods=["post"], url_path="auto-assign")
     def auto_assign(self, request):
         if not is_sme(request.user):
@@ -172,9 +154,12 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
         if not self._can_manage_unit(request.user, unit):
             raise PermissionDenied("You do not have permission to download this file.")
 
-        file_path = self._resolve_source_file_path(unit)
-        handle = open(file_path, "rb")
-        return FileResponse(handle, as_attachment=True, filename=file_path.name)
+        if not unit.work_file.source_file:
+            raise NotFound("Source file not found.")
+
+        filename = Path(unit.work_file.source_file.name).name
+        handle = unit.work_file.source_file.open("rb")
+        return FileResponse(handle, as_attachment=True, filename=filename)
 
     @action(detail=True, methods=["post"], url_path="submit-production")
     def submit_production(self, request, pk=None):

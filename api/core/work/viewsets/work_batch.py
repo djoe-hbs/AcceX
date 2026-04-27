@@ -333,7 +333,6 @@ class WorkBatchViewSet(viewsets.ModelViewSet):
             .order_by("relative_path")
         )
 
-        # source is either a FieldFile (S3-backed production output) or a local Path (extracted source fallback)
         files_to_zip = []
         seen_paths = set()
 
@@ -351,16 +350,9 @@ class WorkBatchViewSet(viewsets.ModelViewSet):
                     source = unit.production_output
                     break
 
-            # Fallback to the original extracted source file (local disk)
-            if not source and batch.extraction_root:
-                root = (Path(settings.WORK_EXTRACTION_ROOT) / batch.extraction_root).resolve()
-                candidate = (root / work_file.relative_path).resolve()
-                try:
-                    candidate.relative_to(root)
-                    if candidate.exists() and candidate.is_file():
-                        source = candidate
-                except ValueError:
-                    pass
+            # Fallback to the original extracted source file stored in S3
+            if not source and work_file.source_file:
+                source = work_file.source_file
 
             if source and work_file.relative_path not in seen_paths:
                 files_to_zip.append((source, work_file.relative_path))
@@ -379,11 +371,8 @@ class WorkBatchViewSet(viewsets.ModelViewSet):
 
         with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for source, archive_name in files_to_zip:
-                if isinstance(source, Path):
-                    zf.write(source, arcname=archive_name)
-                else:
-                    with source.open("rb") as f:
-                        zf.writestr(archive_name, f.read())
+                with source.open("rb") as f:
+                    zf.writestr(archive_name, f.read())
 
         handle = open(tmp_path, "rb")
         response = FileResponse(
