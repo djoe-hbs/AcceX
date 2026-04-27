@@ -1,3 +1,4 @@
+import os
 import shutil
 import tempfile
 import zipfile
@@ -159,7 +160,7 @@ def _build_file_tree(batch: WorkBatch, extraction_root: Path):
     total_files = 0
     total_directories = 0
 
-    for current_root, dirs, files in sorted(extraction_root.walk()):
+    for current_root, dirs, files in sorted(os.walk(extraction_root)):
         current_root = Path(current_root)
         relative_root = current_root.relative_to(extraction_root)
 
