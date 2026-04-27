@@ -1,16 +1,22 @@
 import tempfile
+import threading
+import uuid
 import zipfile
 
+from botocore.config import Config
 from django.core.exceptions import ObjectDoesNotExist
+from django.db import connection as db_connection
 from pathlib import Path
 from django.http import FileResponse
 
+import boto3
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from core.client.models import Client
 from core.permissions import can_manage_work_batches, is_sme
 from django.conf import settings
 from core.work.models import WorkBatch, WorkBatchMember, WorkUnit, WorkFile, WorkDeliveryPackage, WorkClientReview
@@ -30,6 +36,7 @@ from core.work.services import (
     generate_delivery_package,
     apply_client_review,
     mark_batch_signed_off,
+    process_work_batch,
 )
 
 
@@ -69,6 +76,85 @@ class WorkBatchViewSet(viewsets.ModelViewSet):
         batch = serializer.save()
 
         return Response(self.get_serializer(batch).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"], url_path="request-upload")
+    def request_upload(self, request):
+        """Return S3 presigned POST credentials for direct browser-to-S3 upload.
+        Falls back to {"type": "direct"} when S3 is not configured (local dev)."""
+        if not can_manage_work_batches(request.user):
+            raise PermissionDenied("Only superadmin and admin can upload batches.")
+
+        bucket = settings.AWS_STORAGE_BUCKET_NAME
+        if not bucket:
+            return Response({"type": "direct"}, status=status.HTTP_200_OK)
+
+        upload_id = uuid.uuid4().hex
+        s3_key = f"work/source/{upload_id}.zip"
+
+        s3_client = boto3.client(
+            "s3",
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_S3_REGION_NAME,
+            config=Config(signature_version="s3v4"),
+        )
+
+        presigned = s3_client.generate_presigned_post(
+            Bucket=bucket,
+            Key=s3_key,
+            Conditions=[
+                ["content-length-range", 1, 5 * 1024 * 1024 * 1024 * 1024],  # 5 TB max (S3 single-object limit)
+            ],
+            ExpiresIn=3600,
+        )
+
+        return Response({
+            "type": "s3_presigned",
+            "upload_url": presigned["url"],
+            "fields": presigned["fields"],
+            "s3_key": s3_key,
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="confirm-upload")
+    def confirm_upload(self, request):
+        """Create a WorkBatch from a file already uploaded directly to S3."""
+        if not can_manage_work_batches(request.user):
+            raise PermissionDenied("Only superadmin and admin can upload batches.")
+
+        name = (request.data.get("name") or "").strip()
+        client_id = (request.data.get("client_id") or "").strip()
+        s3_key = (request.data.get("s3_key") or "").strip()
+
+        errors = {}
+        if not name:
+            errors["name"] = "This field is required."
+        if not client_id:
+            errors["client_id"] = "This field is required."
+        if not s3_key or not s3_key.startswith("work/source/") or not s3_key.endswith(".zip"):
+            errors["s3_key"] = "Invalid S3 key."
+        if errors:
+            raise ValidationError(errors)
+
+        try:
+            client = Client.objects.get(public_id=client_id, is_active=True)
+        except (Client.DoesNotExist, ValueError, TypeError):
+            raise ValidationError({"client_id": "Invalid client."})
+
+        batch = WorkBatch.objects.create(
+            name=name,
+            client=client,
+            source_archive=s3_key,
+            uploaded_by=request.user,
+        )
+
+        def _process():
+            try:
+                process_work_batch(batch)
+            finally:
+                db_connection.close()
+
+        threading.Thread(target=_process, daemon=True).start()
+        return Response(WorkBatchSerializer(batch).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"], url_path="files")
     def files(self, request, pk=None):
@@ -125,12 +211,12 @@ class WorkBatchViewSet(viewsets.ModelViewSet):
         except (WorkDeliveryPackage.DoesNotExist, ValueError, TypeError):
             raise NotFound("Delivery package not found.")
 
-        archive_path = Path(package.archive.path)
-        if not archive_path.exists() or not archive_path.is_file():
+        if not package.archive:
             raise NotFound("Delivery archive not found.")
 
-        handle = open(archive_path, "rb")
-        return FileResponse(handle, as_attachment=True, filename=archive_path.name)
+        filename = Path(package.archive.name).name
+        handle = package.archive.open("rb")
+        return FileResponse(handle, as_attachment=True, filename=filename)
 
     @action(detail=True, methods=["post"], url_path="client-review/upload")
     def upload_client_review(self, request, pk=None):
@@ -174,12 +260,9 @@ class WorkBatchViewSet(viewsets.ModelViewSet):
         if not review.review_file:
             raise NotFound("Review file is not available.")
 
-        file_path = Path(review.review_file.path)
-        if not file_path.exists() or not file_path.is_file():
-            raise NotFound("Review file not found on disk.")
-
-        handle = open(file_path, "rb")
-        return FileResponse(handle, as_attachment=True, filename=file_path.name)
+        filename = Path(review.review_file.name).name
+        handle = review.review_file.open("rb")
+        return FileResponse(handle, as_attachment=True, filename=filename)
 
     @action(detail=True, methods=["post"], url_path="sign-off")
     def sign_off(self, request, pk=None):
@@ -250,38 +333,37 @@ class WorkBatchViewSet(viewsets.ModelViewSet):
             .order_by("relative_path")
         )
 
+        # source is either a FieldFile (S3-backed production output) or a local Path (extracted source fallback)
         files_to_zip = []
         seen_paths = set()
 
         for work_file in work_files:
-            # Find the latest production output across all units for this file
+            source = None
+
+            # Prefer latest production output from S3
             units = (
                 WorkUnit.objects.filter(work_file=work_file)
                 .exclude(production_output="")
                 .order_by("-production_output_uploaded_at", "-updated")
             )
-
-            source_path = None
             for unit in units:
                 if unit.production_output:
-                    candidate = Path(unit.production_output.path)
-                    if candidate.exists() and candidate.is_file():
-                        source_path = candidate
-                        break
+                    source = unit.production_output
+                    break
 
-            # Fallback to the original source file from extraction
-            if not source_path and batch.extraction_root:
+            # Fallback to the original extracted source file (local disk)
+            if not source and batch.extraction_root:
                 root = (Path(settings.WORK_EXTRACTION_ROOT) / batch.extraction_root).resolve()
                 candidate = (root / work_file.relative_path).resolve()
                 try:
                     candidate.relative_to(root)
                     if candidate.exists() and candidate.is_file():
-                        source_path = candidate
+                        source = candidate
                 except ValueError:
                     pass
 
-            if source_path and work_file.relative_path not in seen_paths:
-                files_to_zip.append((source_path, work_file.relative_path))
+            if source and work_file.relative_path not in seen_paths:
+                files_to_zip.append((source, work_file.relative_path))
                 seen_paths.add(work_file.relative_path)
 
         if not files_to_zip:
@@ -296,8 +378,12 @@ class WorkBatchViewSet(viewsets.ModelViewSet):
         tmp.close()
 
         with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for source_path, archive_name in files_to_zip:
-                zf.write(source_path, arcname=archive_name)
+            for source, archive_name in files_to_zip:
+                if isinstance(source, Path):
+                    zf.write(source, arcname=archive_name)
+                else:
+                    with source.open("rb") as f:
+                        zf.writestr(archive_name, f.read())
 
         handle = open(tmp_path, "rb")
         response = FileResponse(

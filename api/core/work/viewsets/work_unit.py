@@ -102,7 +102,7 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
         if not unit.batch.extraction_root:
             raise NotFound("Batch extraction path not available.")
 
-        root = (Path(settings.MEDIA_ROOT) / unit.batch.extraction_root).resolve()
+        root = (Path(settings.WORK_EXTRACTION_ROOT) / unit.batch.extraction_root).resolve()
         candidate = (root / unit.work_file.relative_path).resolve()
 
         try:
@@ -209,12 +209,9 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
         if not unit.production_output:
             raise NotFound("Production output file is not available.")
 
-        output_path = Path(unit.production_output.path)
-        if not output_path.exists() or not output_path.is_file():
-            raise NotFound("Production output file is not found.")
-
-        handle = open(output_path, "rb")
-        return FileResponse(handle, as_attachment=True, filename=output_path.name)
+        filename = Path(unit.production_output.name).name
+        handle = unit.production_output.open("rb")
+        return FileResponse(handle, as_attachment=True, filename=filename)
 
     @action(detail=True, methods=["get"], url_path="download-redo-report")
     def download_redo_report(self, request, pk=None):
@@ -226,12 +223,9 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
         if not unit.redo_report_file:
             raise NotFound("Redo report file is not available.")
 
-        report_path = Path(unit.redo_report_file.path)
-        if not report_path.exists() or not report_path.is_file():
-            raise NotFound("Redo report file is not found.")
-
-        handle = open(report_path, "rb")
-        return FileResponse(handle, as_attachment=True, filename=report_path.name)
+        filename = Path(unit.redo_report_file.name).name
+        handle = unit.redo_report_file.open("rb")
+        return FileResponse(handle, as_attachment=True, filename=filename)
 
     @action(detail=True, methods=["post"], url_path="validate")
     def validate_unit(self, request, pk=None):

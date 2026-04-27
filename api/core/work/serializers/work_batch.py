@@ -1,5 +1,7 @@
+import threading
 import zipfile
 
+from django.db import connection as db_connection
 from rest_framework import serializers
 
 from core.client.models import Client
@@ -53,7 +55,13 @@ class WorkBatchSerializer(serializers.ModelSerializer):
             **validated_data,
         )
 
-        process_work_batch(batch)
+        def _process():
+            try:
+                process_work_batch(batch)
+            finally:
+                db_connection.close()
+
+        threading.Thread(target=_process, daemon=True).start()
         return batch
 
 
