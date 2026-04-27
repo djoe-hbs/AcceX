@@ -1,10 +1,7 @@
 import os
-import shutil
 import tempfile
 import zipfile
-from pathlib import Path
 
-from django.conf import settings
 from django.core.files import File
 from django.db import transaction
 from django.utils import timezone
@@ -18,27 +15,8 @@ from core.work.services.notification_engine import (
 )
 
 
-def _resolve_source_file_path(batch: WorkBatch, work_file: WorkFile):
-    """Return local Path for an extracted source file, or None if not found."""
-    if not batch.extraction_root:
-        return None
-
-    root = (Path(settings.WORK_EXTRACTION_ROOT) / batch.extraction_root).resolve()
-    candidate = (root / work_file.relative_path).resolve()
-
-    try:
-        candidate.relative_to(root)
-    except ValueError:
-        return None
-
-    if not candidate.exists() or not candidate.is_file():
-        return None
-
-    return candidate
-
-
 def _resolve_delivery_source_for_file(work_file: WorkFile, mode: str):
-    """Return the best source for a file as either a FieldFile (S3) or a local Path, or None."""
+    """Return the best source for a file as a stored file object, or None."""
     units = list(work_file.units.all())
 
     latest_output_unit = None
@@ -61,16 +39,13 @@ def _resolve_delivery_source_for_file(work_file: WorkFile, mode: str):
     if all_completed and latest_output_unit and latest_output_unit.production_output:
         return latest_output_unit.production_output
 
-    return _resolve_source_file_path(work_file.batch, work_file)
+    return work_file.source_file if work_file.source_file else None
 
 
 def _write_source_to_zip(zf: zipfile.ZipFile, source, arcname: str):
-    """Write either a FieldFile (S3) or a local Path into an open ZipFile."""
-    if isinstance(source, Path):
-        zf.write(source, arcname=arcname)
-    else:
-        with source.open("rb") as src:
-            zf.writestr(arcname, src.read())
+    """Write a stored file into an open ZipFile."""
+    with source.open("rb") as src:
+        zf.writestr(arcname, src.read())
 
 
 def generate_delivery_package(batch: WorkBatch, mode: str, generated_by):
@@ -81,8 +56,6 @@ def generate_delivery_package(batch: WorkBatch, mode: str, generated_by):
     for work_file in files:
         source = _resolve_delivery_source_for_file(work_file, mode)
         if not source:
-            continue
-        if isinstance(source, Path) and (not source.exists() or not source.is_file()):
             continue
         include_files.append((source, work_file.relative_path))
 
