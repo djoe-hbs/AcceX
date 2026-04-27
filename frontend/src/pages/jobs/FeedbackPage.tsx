@@ -348,14 +348,14 @@ function ReworkSelectionPanel({
   const setProdUser = (unitId: string, userId: string) => {
     setSelected((prev) => ({
       ...prev,
-      [unitId]: { validation_user_id: '', ...prev[unitId], production_user_id: userId },
+      [unitId]: { ...prev[unitId], production_user_id: userId },
     }))
   }
 
   const setValUser = (unitId: string, userId: string) => {
     setSelected((prev) => ({
       ...prev,
-      [unitId]: { production_user_id: '', ...prev[unitId], validation_user_id: userId },
+      [unitId]: { ...prev[unitId], validation_user_id: userId },
     }))
   }
 
