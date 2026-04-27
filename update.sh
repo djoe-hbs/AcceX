@@ -26,4 +26,9 @@ npm run build
 echo "Restarting Backend Service..."
 sudo systemctl restart accex-backend.service
 
+# 5. Fix permissions
+echo "Ensuring correct permissions..."
+sudo chown -R www-data:www-data /var/www/accex
+sudo chmod -R 775 /var/www/accex/api
+
 echo "Update completed successfully!"
