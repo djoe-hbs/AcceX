@@ -1,12 +1,24 @@
 import threading
 import zipfile
 
-from django.db import connection as db_connection
+from django.db import close_old_connections, connection as db_connection, transaction
 from rest_framework import serializers
 
 from core.client.models import Client
 from core.work.models import WorkBatch, WorkDeliveryPackage, WorkClientReview
 from core.work.services import process_work_batch
+
+
+def _start_batch_processing(batch_id):
+    def _process():
+        close_old_connections()
+        try:
+            batch = WorkBatch.objects.get(id=batch_id)
+            process_work_batch(batch)
+        finally:
+            db_connection.close()
+
+    transaction.on_commit(lambda: threading.Thread(target=_process, daemon=True).start())
 
 
 class WorkBatchSerializer(serializers.ModelSerializer):
@@ -54,14 +66,7 @@ class WorkBatchSerializer(serializers.ModelSerializer):
             uploaded_by=request.user if request and hasattr(request, "user") else None,
             **validated_data,
         )
-
-        def _process():
-            try:
-                process_work_batch(batch)
-            finally:
-                db_connection.close()
-
-        threading.Thread(target=_process, daemon=True).start()
+        _start_batch_processing(batch.id)
         return batch
 
 

@@ -1,11 +1,9 @@
 import tempfile
-import threading
 import uuid
 import zipfile
 
 from botocore.config import Config
 from django.core.exceptions import ObjectDoesNotExist
-from django.db import connection as db_connection
 from pathlib import Path
 from django.http import FileResponse
 
@@ -31,12 +29,12 @@ from core.work.serializers import (
     ClientReviewUploadSerializer,
     BatchSignOffSerializer,
 )
+from core.work.serializers.work_batch import _start_batch_processing
 from core.work.services import (
     unassign_unit,
     generate_delivery_package,
     apply_client_review,
     mark_batch_signed_off,
-    process_work_batch,
 )
 
 
@@ -146,14 +144,7 @@ class WorkBatchViewSet(viewsets.ModelViewSet):
             source_archive=s3_key,
             uploaded_by=request.user,
         )
-
-        def _process():
-            try:
-                process_work_batch(batch)
-            finally:
-                db_connection.close()
-
-        threading.Thread(target=_process, daemon=True).start()
+        _start_batch_processing(batch.id)
         return Response(WorkBatchSerializer(batch).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"], url_path="files")
