@@ -1,4 +1,4 @@
-import axios from 'axios'
+import axios, { type AxiosProgressEvent } from 'axios'
 
 type UiRole = 'superadmin' | 'admin' | 'sme' | 'production' | 'validation'
 
@@ -133,7 +133,7 @@ export async function fetchAllPages(url: string) {
   return items
 }
 
-function buildFileTree(files: any[]) {
+export function buildFileTree(files: any[]) {
   const roots: any[] = []
   const folders = new Map<string, any>()
 
@@ -337,15 +337,27 @@ export const jobsApi = {
     const response = await api.get(`/work/batch/${id}/`)
     return { ...response, data: mapBatch(response.data) }
   },
-  create: async (formData: FormData) => {
+  create: async (formData: FormData, onUploadProgress?: (event: AxiosProgressEvent) => void) => {
     const response = await api.post('/work/batch/', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress,
     })
     return { ...response, data: mapBatch(response.data) }
   },
   files: async (id: string) => {
     const data = await fetchAllPages(`/work/batch/${id}/files/`)
     return { data }
+  },
+  filesPaged: async (id: string, page = 1) => {
+    const response = await api.get(`/work/batch/${id}/files/?page=${page}`)
+    const payload = response.data
+    const results = Array.isArray(payload?.results) ? payload.results : Array.isArray(payload) ? payload : []
+    return {
+      data: results,
+      count: payload?.count ?? results.length,
+      next: payload?.next ?? null,
+      page,
+    }
   },
   fileTree: async (id: string) => {
     const response = await jobsApi.files(id)
@@ -383,6 +395,21 @@ export const jobsApi = {
     api.post(`/work/batch/${id}/mark-rework-complete/`),
   deactivate: (id: string) =>
     api.post(`/work/batch/${id}/deactivate/`),
+  requestUpload: () =>
+    api.post<
+      | { type: 'direct' }
+      | { type: 's3_presigned'; upload_url: string; fields: Record<string, string>; s3_key: string }
+    >('/work/batch/request-upload/'),
+  uploadToS3: (uploadUrl: string, fields: Record<string, string>, file: File, onUploadProgress?: (e: AxiosProgressEvent) => void) => {
+    const formData = new FormData()
+    Object.entries(fields).forEach(([k, v]) => formData.append(k, v))
+    formData.append('file', file)
+    return axios.post(uploadUrl, formData, { onUploadProgress })
+  },
+  confirmUpload: async (data: { name: string; client_id: string; s3_key: string }) => {
+    const response = await api.post('/work/batch/confirm-upload/', data)
+    return { ...response, data: mapBatch(response.data) }
+  },
 }
 
 export const chunksApi = {

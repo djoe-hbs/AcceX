@@ -1,10 +1,26 @@
 import uuid
+from pathlib import PurePosixPath
 
 from django.db import models
 from storages.backends.s3boto3 import S3Boto3Storage
 
 from core.user.models import User
 from core.client.models import Client
+
+
+def normalize_work_relative_path(value):
+    raw = (value or "").replace("\\", "/").strip("/")
+    if not raw:
+        return ""
+
+    parts = [part for part in PurePosixPath(raw).parts if part not in ("", ".", "..")]
+    return "/".join(parts)
+
+
+def work_file_source_upload_to(instance, filename):
+    batch_id = instance.batch.public_id.hex if instance.batch_id else "unassigned"
+    relative_path = normalize_work_relative_path(instance.relative_path or filename or "file") or "file"
+    return f"work/extracted/{batch_id}/{relative_path}"
 
 
 
@@ -109,6 +125,13 @@ class WorkFile(models.Model):
     count = models.PositiveBigIntegerField(blank=True, null=True)
 
     size_bytes = models.PositiveBigIntegerField(default=0)
+    source_file = models.FileField(
+        upload_to=work_file_source_upload_to,
+        storage=S3Boto3Storage(),
+        max_length=1024,
+        blank=True,
+        null=True,
+    )
 
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)

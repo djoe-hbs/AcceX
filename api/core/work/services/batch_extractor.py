@@ -1,9 +1,11 @@
+import os
 import shutil
 import tempfile
 import zipfile
 from pathlib import Path
 
 from django.conf import settings
+from django.core.files import File
 from django.db import transaction
 
 from pypdf import PdfReader
@@ -11,7 +13,7 @@ from docx import Document
 from docx.oxml.ns import qn
 from openpyxl import load_workbook
 
-from core.work.models import WorkBatch, WorkFile
+from core.work.models import WorkBatch, WorkFile, normalize_work_relative_path
 
 
 SUPPORTED_EXCEL_EXTENSIONS = {".xlsx", ".xlsm", ".xltx", ".xltm"}
@@ -23,7 +25,11 @@ def _safe_extract_zip(zip_path: Path, destination: Path):
 
     with zipfile.ZipFile(zip_path, "r") as zip_ref:
         for member in zip_ref.infolist():
-            member_path = destination / member.filename
+            normalized_name = normalize_work_relative_path(member.filename)
+            if not normalized_name:
+                continue
+
+            member_path = destination / Path(*normalized_name.split("/"))
             resolved_member_path = member_path.resolve()
             resolved_destination = destination.resolve()
 
@@ -154,7 +160,7 @@ def _build_file_tree(batch: WorkBatch, extraction_root: Path):
     total_files = 0
     total_directories = 0
 
-    for current_root, dirs, files in sorted(extraction_root.walk()):
+    for current_root, dirs, files in sorted(os.walk(extraction_root)):
         current_root = Path(current_root)
         relative_root = current_root.relative_to(extraction_root)
 
@@ -162,7 +168,9 @@ def _build_file_tree(batch: WorkBatch, extraction_root: Path):
         files.sort()
 
         for directory in dirs:
-            relative_path = (relative_root / directory).as_posix() if str(relative_root) != "." else directory
+            relative_path = normalize_work_relative_path(
+                (relative_root / directory).as_posix() if str(relative_root) != "." else directory
+            )
             parent_key = Path(relative_path).parent.as_posix()
             parent = node_lookup.get(parent_key) if parent_key != "." else None
 
@@ -184,7 +192,9 @@ def _build_file_tree(batch: WorkBatch, extraction_root: Path):
 
         for file_name in files:
             absolute_file = current_root / file_name
-            relative_path = (relative_root / file_name).as_posix() if str(relative_root) != "." else file_name
+            relative_path = normalize_work_relative_path(
+                (relative_root / file_name).as_posix() if str(relative_root) != "." else file_name
+            )
             parent_key = Path(relative_path).parent.as_posix()
             parent = node_lookup.get(parent_key) if parent_key != "." else None
 
@@ -204,6 +214,9 @@ def _build_file_tree(batch: WorkBatch, extraction_root: Path):
                 count=count,
                 size_bytes=absolute_file.stat().st_size,
             )
+            with absolute_file.open("rb") as stream:
+                node.source_file.save(Path(relative_path).name, File(stream), save=False)
+            node.save(update_fields=["source_file", "updated"])
             node_lookup[relative_path] = node
             total_files += 1
 
@@ -244,3 +257,5 @@ def process_work_batch(batch: WorkBatch):
         batch.error_message = str(exc)
         batch.save(update_fields=["status", "error_message", "updated"])
         raise
+    finally:
+        shutil.rmtree(extraction_root, ignore_errors=True)

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { jobsApi, usersApi, chunksApi, clientsApi } from '@/api/client'
@@ -9,6 +9,7 @@ import {
   JobStatusBadge,
   Modal,
   PageLoader,
+  ProgressBar,
   Table,
 } from '@/components/shared'
 import { FileTreeViewer } from '@/components/shared/FileTree'
@@ -142,79 +143,210 @@ function CreateJobModal({ onClose }: { onClose: () => void }) {
   const [clientId, setClientId] = useState('')
   const [zipFile, setZipFile] = useState<File | null>(null)
   const [error, setError] = useState('')
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadedBytes, setUploadedBytes] = useState(0)
+  const [totalBytes, setTotalBytes] = useState(0)
+  const [processingBatchId, setProcessingBatchId] = useState<string | null>(null)
+  const [succeeded, setSucceeded] = useState(false)
 
   const { data: clientsData } = useQuery({
     queryKey: ['clients'],
     queryFn: () => clientsApi.list(),
   })
 
-  const createMutation = useMutation({
-    mutationFn: (formData: FormData) => jobsApi.create(formData),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['jobs'] })
-      onClose()
-    },
-    onError: (err: any) => {
-      setError(err.response?.data?.detail || 'Job upload failed.')
+  const { data: pollData } = useQuery({
+    queryKey: ['job-upload-poll', processingBatchId],
+    queryFn: () => jobsApi.get(processingBatchId!),
+    enabled: Boolean(processingBatchId) && !succeeded,
+    refetchInterval: (query) => {
+      const s = (query.state.data as any)?.data?.status
+      if (s === 'ready' || s === 'failed') return false
+      return 2000
     },
   })
 
-  const MAX_UPLOAD_SIZE = 500 * 1024 * 1024 // 500 MB
+  const batchStatus = pollData?.data?.status
+  const batchFileCount = pollData?.data?.total_files ?? 0
+  const batchErrorMessage = pollData?.data?.error_message
+
+  useEffect(() => {
+    if (batchStatus === 'ready') {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+      setSucceeded(true)
+      const timer = setTimeout(() => onClose(), 2000)
+      return () => clearTimeout(timer)
+    }
+  }, [batchStatus, queryClient, onClose])
+
+  const createMutation = useMutation({
+    mutationFn: async (vars: { title: string; clientId: string; zipFile: File }) => {
+      const onProgress = (event: any) => {
+        const loaded: number = event.loaded ?? 0
+        const total: number = event.total ?? vars.zipFile.size
+        setUploadedBytes(loaded)
+        setTotalBytes(total)
+        setUploadProgress(total > 0 ? Math.round((loaded / total) * 100) : 0)
+      }
+
+      const metaRes = await jobsApi.requestUpload()
+      const meta = metaRes.data
+
+      if (meta.type === 'direct') {
+        const formData = new FormData()
+        formData.append('name', vars.title)
+        formData.append('client_id', vars.clientId)
+        formData.append('source_archive', vars.zipFile)
+        return jobsApi.create(formData, onProgress)
+      }
+
+      await jobsApi.uploadToS3(meta.upload_url, meta.fields, vars.zipFile, onProgress)
+      return jobsApi.confirmUpload({ name: vars.title, client_id: vars.clientId, s3_key: meta.s3_key })
+    },
+    onSuccess: (response) => {
+      setUploadProgress(100)
+      setProcessingBatchId(response.data.id)
+    },
+    onError: (err: any) => {
+      setUploadProgress(0)
+      setUploadedBytes(0)
+      setTotalBytes(0)
+      setError(err.response?.data?.detail || err.message || 'Job upload failed.')
+    },
+  })
+
+  const formatBytes = (bytes: number) => {
+    if (bytes <= 0) return '0 B'
+    const units = ['B', 'KB', 'MB', 'GB', 'TB']
+    const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+    const value = bytes / 1024 ** exponent
+    return `${value.toFixed(value >= 100 || exponent === 0 ? 0 : 1)} ${units[exponent]}`
+  }
 
   const handleSubmit = () => {
+    setError('')
     if (!title || !clientId || !zipFile) {
       setError('Name, client, and ZIP archive are required.')
       return
     }
-
     if (!zipFile.name.toLowerCase().endsWith('.zip')) {
       setError('Only .zip files are accepted.')
       return
     }
-
-    if (zipFile.size > MAX_UPLOAD_SIZE) {
-      setError(`File exceeds the 500 MB limit (${(zipFile.size / 1024 / 1024).toFixed(1)} MB).`)
-      return
-    }
-
-    const formData = new FormData()
-    formData.append('name', title)
-    formData.append('client_id', clientId)
-    formData.append('source_archive', zipFile)
-    createMutation.mutate(formData)
+    setUploadProgress(0)
+    setUploadedBytes(0)
+    setTotalBytes(zipFile.size)
+    createMutation.mutate({ title, clientId, zipFile })
   }
+
+  const isUploading = createMutation.isPending && !processingBatchId
+  const isSendingToServer = createMutation.isPending && uploadProgress >= 100 && !processingBatchId
+  const isServerProcessing = Boolean(processingBatchId) && !succeeded && batchStatus !== 'failed'
+  const isFailed = batchStatus === 'failed'
+  const isActive = isUploading || isServerProcessing || succeeded
 
   return (
     <Modal open onClose={onClose} title="Upload Job" size="md">
       <div className="space-y-4">
         {error && <Alert type="error" message={error} />}
 
-        <div>
-          <label className="label">Job name</label>
-          <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Accessibility batch name" />
-        </div>
+        {!isActive && !isFailed && (
+          <>
+            <div>
+              <label className="label">Job name</label>
+              <input
+                className="input"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Accessibility batch name"
+                disabled={isUploading}
+              />
+            </div>
+            <div>
+              <label className="label">Client</label>
+              <select className="input" value={clientId} onChange={(e) => setClientId(e.target.value)} disabled={isUploading}>
+                <option value="">Select client</option>
+                {(clientsData?.data || []).map((client: any) => (
+                  <option key={client.id} value={client.id}>{client.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">ZIP archive</label>
+              <input type="file" accept=".zip" className="input" onChange={(e) => setZipFile(e.target.files?.[0] || null)} disabled={isUploading} />
+            </div>
+          </>
+        )}
 
-        <div>
-          <label className="label">Client</label>
-          <select className="input" value={clientId} onChange={(e) => setClientId(e.target.value)}>
-            <option value="">Select client</option>
-            {(clientsData?.data || []).map((client: any) => (
-              <option key={client.id} value={client.id}>{client.name}</option>
-            ))}
-          </select>
-        </div>
+        {isUploading && (
+          <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-4 space-y-3">
+            <div className="flex items-center justify-between text-sm">
+              <p className="font-medium text-blue-900">
+                {isSendingToServer ? 'Sending to server…' : 'Uploading ZIP to cloud storage'}
+              </p>
+              <span className="font-semibold text-blue-700">
+                {isSendingToServer ? '100%' : `${uploadProgress}%`}
+              </span>
+            </div>
+            <ProgressBar value={Math.max(uploadProgress, 2)} className="h-2" />
+            <p className="text-xs text-blue-700">
+              {isSendingToServer
+                ? 'Transfer complete — waiting for server confirmation…'
+                : uploadedBytes > 0
+                ? `${formatBytes(uploadedBytes)} of ${formatBytes(totalBytes || zipFile?.size || 0)}`
+                : 'Preparing upload…'}
+            </p>
+          </div>
+        )}
 
-        <div>
-          <label className="label">ZIP archive</label>
-          <input type="file" accept=".zip" className="input" onChange={(e) => setZipFile(e.target.files?.[0] || null)} />
-        </div>
+        {isServerProcessing && (
+          <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-5 space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+              <p className="font-medium text-indigo-900 text-sm">Server is extracting and indexing files…</p>
+            </div>
+            <div className="w-full h-1.5 rounded-full bg-indigo-100 overflow-hidden">
+              <div className="h-full bg-indigo-400 rounded-full animate-pulse" style={{ width: '60%' }} />
+            </div>
+            <p className="text-xs text-indigo-700">
+              The ZIP is being unpacked and each file is being counted. This may take a few seconds for large batches.
+            </p>
+          </div>
+        )}
+
+        {succeeded && (
+          <div className="rounded-xl border border-green-200 bg-green-50 p-5 flex items-start gap-3">
+            <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <div>
+              <p className="font-semibold text-green-900 text-sm">Job created successfully</p>
+              <p className="text-xs text-green-700 mt-0.5">
+                {batchFileCount > 0 ? `${batchFileCount} file${batchFileCount !== 1 ? 's' : ''} indexed. ` : ''}
+                Closing…
+              </p>
+            </div>
+          </div>
+        )}
+
+        {isFailed && (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4 space-y-1">
+            <p className="font-semibold text-red-800 text-sm">Processing failed on the server</p>
+            {batchErrorMessage && <p className="text-xs text-red-700">{batchErrorMessage}</p>}
+          </div>
+        )}
 
         <div className="flex justify-end gap-2">
-          <button className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" onClick={handleSubmit} disabled={createMutation.isPending}>
-            <Upload className="w-4 h-4" />
-            {createMutation.isPending ? 'Uploading...' : 'Upload'}
+          <button className="btn-secondary" onClick={onClose} disabled={isUploading}>
+            {succeeded || isFailed ? 'Close' : 'Cancel'}
           </button>
+          {!isActive && !isFailed && (
+            <button className="btn-primary" onClick={handleSubmit} disabled={isUploading}>
+              <Upload className="w-4 h-4" />
+              Upload
+            </button>
+          )}
         </div>
       </div>
     </Modal>
@@ -294,6 +426,7 @@ export function JobDetailPage() {
     refetchInterval: 15000,
   })
 
+  if (jobLoading || membersLoading || unitsLoading) {
   if (jobLoading || membersLoading || unitsLoading) {
     return <PageLoader />
   }
@@ -741,8 +874,34 @@ function MemberRow({ member, batchId, canManage }: { member: any; batchId: strin
   )
 }
 
+const UNITS_PAGE_SIZE = 5
+
+function UnitGroupList({ units, members, batchId, canManage }: { units: any[]; members: any[]; batchId: string; canManage: boolean }) {
+  const [visibleCount, setVisibleCount] = useState(UNITS_PAGE_SIZE)
+  const visibleUnits = units.slice(0, visibleCount)
+  const hasMore = visibleCount < units.length
+
+  return (
+    <div className="divide-y divide-gray-50">
+      {visibleUnits.map((unit: any) => (
+        <UnitRow key={unit.chunk_id} unit={unit} members={members} batchId={batchId} canManage={canManage} />
+      ))}
+      {hasMore && (
+        <div className="px-3 py-2">
+          <button
+            className="w-full text-sm text-blue-600 hover:text-blue-800 font-medium py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
+            onClick={() => setVisibleCount((v) => v + UNITS_PAGE_SIZE)}
+          >
+            Load More ({visibleCount} of {units.length} files)
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AssignedFilesView({ units, members, batchId, canManage }: { units: any[]; members: any[]; batchId: string; canManage: boolean }) {
-  const [visibleCount, setVisibleCount] = useState(1)
+  const [visibleGroupCount, setVisibleGroupCount] = useState(3)
 
   const pendingUnits = units.filter((u: any) => u.status === 'pending')
   const assignedUnits = units.filter((u: any) => u.status !== 'pending')
@@ -765,8 +924,8 @@ function AssignedFilesView({ units, members, batchId, canManage }: { units: any[
     return <EmptyState title="No assigned files yet" description="Files appear here after auto-assignment is run." />
   }
 
-  const visibleGroups = userGroups.slice(0, visibleCount)
-  const hasMoreUsers = visibleCount < userGroups.length
+  const visibleGroups = userGroups.slice(0, visibleGroupCount)
+  const hasMoreGroups = visibleGroupCount < userGroups.length
 
   return (
     <div className="space-y-4">
@@ -781,20 +940,16 @@ function AssignedFilesView({ units, members, batchId, canManage }: { units: any[
               {group.totalPages} {group.totalPages === 1 ? 'page' : 'pages'}
             </span>
           </div>
-          <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
-            {group.units.map((unit: any) => (
-              <UnitRow key={unit.chunk_id} unit={unit} members={members} batchId={batchId} canManage={canManage} />
-            ))}
-          </div>
+          <UnitGroupList units={group.units} members={members} batchId={batchId} canManage={canManage} />
         </div>
       ))}
 
-      {hasMoreUsers && (
+      {hasMoreGroups && (
         <button
           className="btn-secondary text-sm w-full"
-          onClick={() => setVisibleCount((v) => v + 1)}
+          onClick={() => setVisibleGroupCount((v) => v + 3)}
         >
-          Load More ({visibleCount} of {userGroups.length} users)
+          Load More ({visibleGroupCount} of {userGroups.length} users)
         </button>
       )}
 
@@ -809,11 +964,7 @@ function AssignedFilesView({ units, members, batchId, canManage }: { units: any[
               {pendingUnits.reduce((sum: number, u: any) => sum + (u.unit_count || 1), 0)} pages
             </span>
           </div>
-          <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
-            {pendingUnits.map((unit: any) => (
-              <UnitRow key={unit.chunk_id} unit={unit} members={members} batchId={batchId} canManage={canManage} />
-            ))}
-          </div>
+          <UnitGroupList units={pendingUnits} members={members} batchId={batchId} canManage={canManage} />
         </div>
       )}
     </div>

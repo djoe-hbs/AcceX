@@ -1,9 +1,7 @@
 import os
 import tempfile
 import zipfile
-from pathlib import Path
 
-from django.conf import settings
 from django.core.files import File
 from django.db import transaction
 from django.utils import timezone
@@ -17,25 +15,8 @@ from core.work.services.notification_engine import (
 )
 
 
-def _resolve_source_file_path(batch: WorkBatch, work_file: WorkFile):
-    if not batch.extraction_root:
-        return None
-
-    root = (Path(settings.MEDIA_ROOT) / batch.extraction_root).resolve()
-    candidate = (root / work_file.relative_path).resolve()
-
-    try:
-        candidate.relative_to(root)
-    except ValueError:
-        return None
-
-    if not candidate.exists() or not candidate.is_file():
-        return None
-
-    return candidate
-
-
 def _resolve_delivery_source_for_file(work_file: WorkFile, mode: str):
+    """Return the best source for a file as a stored file object, or None."""
     units = list(work_file.units.all())
 
     latest_output_unit = None
@@ -52,13 +33,19 @@ def _resolve_delivery_source_for_file(work_file: WorkFile, mode: str):
 
     if mode == WorkDeliveryPackage.Mode.COMPLETED_ONLY:
         if all_completed and latest_output_unit and latest_output_unit.production_output:
-            return Path(latest_output_unit.production_output.path)
+            return latest_output_unit.production_output
         return None
 
     if all_completed and latest_output_unit and latest_output_unit.production_output:
-        return Path(latest_output_unit.production_output.path)
+        return latest_output_unit.production_output
 
-    return _resolve_source_file_path(work_file.batch, work_file)
+    return work_file.source_file if work_file.source_file else None
+
+
+def _write_source_to_zip(zf: zipfile.ZipFile, source, arcname: str):
+    """Write a stored file into an open ZipFile."""
+    with source.open("rb") as src:
+        zf.writestr(arcname, src.read())
 
 
 def generate_delivery_package(batch: WorkBatch, mode: str, generated_by):
@@ -67,14 +54,10 @@ def generate_delivery_package(batch: WorkBatch, mode: str, generated_by):
     files = batch.files.filter(is_directory=False).exclude(file_type=WorkFile.FileType.ZIP).order_by("relative_path")
 
     for work_file in files:
-        source_path = _resolve_delivery_source_for_file(work_file, mode)
-        if not source_path:
+        source = _resolve_delivery_source_for_file(work_file, mode)
+        if not source:
             continue
-
-        if not source_path.exists() or not source_path.is_file():
-            continue
-
-        include_files.append((source_path, work_file.relative_path))
+        include_files.append((source, work_file.relative_path))
 
     if not include_files:
         return None
@@ -84,8 +67,8 @@ def generate_delivery_package(batch: WorkBatch, mode: str, generated_by):
     tmp_file.close()
 
     with zipfile.ZipFile(tmp_file_path, "w", compression=zipfile.ZIP_DEFLATED) as zip_handle:
-        for source_path, archive_relative_path in include_files:
-            zip_handle.write(source_path, arcname=archive_relative_path)
+        for source, arcname in include_files:
+            _write_source_to_zip(zip_handle, source, arcname)
 
     package = WorkDeliveryPackage(batch=batch, mode=mode, total_files=len(include_files), generated_by=generated_by)
     archive_name = f"{batch.public_id.hex}_{mode.lower()}.zip"
@@ -123,10 +106,6 @@ def apply_client_review(batch: WorkBatch, review_file, review_note, uploaded_by)
 
 
 def send_units_for_client_rework(unit_assignments, assigned_by, reason="Client requested rework."):
-    """
-    SME selects which completed units go for rework and to which users.
-    unit_assignments: list of (unit, production_user, validation_user) tuples
-    """
     with transaction.atomic():
         for unit, production_user, validation_user in unit_assignments:
             close_active_assignments(unit, WorkUnitAssignment.Stage.PRODUCTION)

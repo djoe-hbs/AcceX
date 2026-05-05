@@ -1,7 +1,6 @@
 from datetime import timedelta
 from pathlib import Path
 
-from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from django.http import FileResponse
@@ -104,6 +103,7 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
             return True
         return False
 
+<<<<<<< HEAD
     def _is_validation_member_for_batch(self, user, batch_id):
         return WorkBatchMember.objects.filter(
             batch_id=batch_id,
@@ -129,6 +129,8 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
 
         return candidate
 
+=======
+>>>>>>> ff8d77a1a34f5b20289b51e0e22b96322802c687
     @action(detail=False, methods=["post"], url_path="auto-assign")
     def auto_assign(self, request):
         if not is_sme(request.user):
@@ -186,9 +188,12 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
         if not self._can_manage_unit(request.user, unit):
             raise PermissionDenied("You do not have permission to download this file.")
 
-        file_path = self._resolve_source_file_path(unit)
-        handle = open(file_path, "rb")
-        return FileResponse(handle, as_attachment=True, filename=file_path.name)
+        if not unit.work_file.source_file:
+            raise NotFound("Source file not found.")
+
+        filename = Path(unit.work_file.source_file.name).name
+        handle = unit.work_file.source_file.open("rb")
+        return FileResponse(handle, as_attachment=True, filename=filename)
 
     @action(detail=True, methods=["post"], url_path="submit-production")
     def submit_production(self, request, pk=None):
@@ -223,12 +228,9 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
         if not unit.production_output:
             raise NotFound("Production output file is not available.")
 
-        output_path = Path(unit.production_output.path)
-        if not output_path.exists() or not output_path.is_file():
-            raise NotFound("Production output file is not found.")
-
-        handle = open(output_path, "rb")
-        return FileResponse(handle, as_attachment=True, filename=output_path.name)
+        filename = Path(unit.production_output.name).name
+        handle = unit.production_output.open("rb")
+        return FileResponse(handle, as_attachment=True, filename=filename)
 
     @action(detail=True, methods=["get"], url_path="download-redo-report")
     def download_redo_report(self, request, pk=None):
@@ -240,12 +242,9 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
         if not unit.redo_report_file:
             raise NotFound("Redo report file is not available.")
 
-        report_path = Path(unit.redo_report_file.path)
-        if not report_path.exists() or not report_path.is_file():
-            raise NotFound("Redo report file is not found.")
-
-        handle = open(report_path, "rb")
-        return FileResponse(handle, as_attachment=True, filename=report_path.name)
+        filename = Path(unit.redo_report_file.name).name
+        handle = unit.redo_report_file.open("rb")
+        return FileResponse(handle, as_attachment=True, filename=filename)
 
     @action(detail=True, methods=["post"], url_path="accept-validation")
     def accept_validation(self, request, pk=None):
