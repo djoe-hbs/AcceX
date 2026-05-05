@@ -394,13 +394,6 @@ export function JobDetailPage() {
     refetchInterval: 15000,
   })
 
-  const { data: filesData, isLoading: filesLoading } = useQuery({
-    queryKey: ['job-files', id],
-    queryFn: () => jobsApi.files(id || ''),
-    enabled: Boolean(id),
-    refetchInterval: 15000,
-  })
-
   const { data: membersData, isLoading: membersLoading } = useQuery({
     queryKey: ['job-members', id],
     queryFn: () => jobsApi.members(id || ''),
@@ -415,7 +408,7 @@ export function JobDetailPage() {
     refetchInterval: 15000,
   })
 
-  if (jobLoading || filesLoading || membersLoading || unitsLoading) {
+  if (jobLoading || membersLoading || unitsLoading) {
     return <PageLoader />
   }
 
@@ -424,7 +417,6 @@ export function JobDetailPage() {
   }
 
   const job = jobData?.data
-  const files = filesData?.data || []
   const members = membersData?.data || []
   const units = unitsData?.data || []
 
@@ -504,7 +496,7 @@ export function JobDetailPage() {
         <div className="card">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-gray-900">Files</h2>
-            <Badge variant="blue">{files.length}</Badge>
+            <Badge variant="blue">{job?.total_files ?? 0}</Badge>
           </div>
           <FileTreeViewer jobId={id || ''} />
         </div>
@@ -850,8 +842,34 @@ function MemberRow({ member, batchId, canManage }: { member: any; batchId: strin
   )
 }
 
+const UNITS_PAGE_SIZE = 5
+
+function UnitGroupList({ units, members, batchId, canManage }: { units: any[]; members: any[]; batchId: string; canManage: boolean }) {
+  const [visibleCount, setVisibleCount] = useState(UNITS_PAGE_SIZE)
+  const visibleUnits = units.slice(0, visibleCount)
+  const hasMore = visibleCount < units.length
+
+  return (
+    <div className="divide-y divide-gray-50">
+      {visibleUnits.map((unit: any) => (
+        <UnitRow key={unit.chunk_id} unit={unit} members={members} batchId={batchId} canManage={canManage} />
+      ))}
+      {hasMore && (
+        <div className="px-3 py-2">
+          <button
+            className="w-full text-sm text-blue-600 hover:text-blue-800 font-medium py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
+            onClick={() => setVisibleCount((v) => v + UNITS_PAGE_SIZE)}
+          >
+            Load More ({visibleCount} of {units.length} files)
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AssignedFilesView({ units, members, batchId, canManage }: { units: any[]; members: any[]; batchId: string; canManage: boolean }) {
-  const [visibleCount, setVisibleCount] = useState(1)
+  const [visibleGroupCount, setVisibleGroupCount] = useState(3)
 
   const pendingUnits = units.filter((u: any) => u.status === 'pending')
   const assignedUnits = units.filter((u: any) => u.status !== 'pending')
@@ -874,8 +892,8 @@ function AssignedFilesView({ units, members, batchId, canManage }: { units: any[
     return <EmptyState title="No assigned files yet" description="Files appear here after auto-assignment is run." />
   }
 
-  const visibleGroups = userGroups.slice(0, visibleCount)
-  const hasMoreUsers = visibleCount < userGroups.length
+  const visibleGroups = userGroups.slice(0, visibleGroupCount)
+  const hasMoreGroups = visibleGroupCount < userGroups.length
 
   return (
     <div className="space-y-4">
@@ -890,20 +908,16 @@ function AssignedFilesView({ units, members, batchId, canManage }: { units: any[
               {group.totalPages} {group.totalPages === 1 ? 'page' : 'pages'}
             </span>
           </div>
-          <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
-            {group.units.map((unit: any) => (
-              <UnitRow key={unit.chunk_id} unit={unit} members={members} batchId={batchId} canManage={canManage} />
-            ))}
-          </div>
+          <UnitGroupList units={group.units} members={members} batchId={batchId} canManage={canManage} />
         </div>
       ))}
 
-      {hasMoreUsers && (
+      {hasMoreGroups && (
         <button
           className="btn-secondary text-sm w-full"
-          onClick={() => setVisibleCount((v) => v + 1)}
+          onClick={() => setVisibleGroupCount((v) => v + 3)}
         >
-          Load More ({visibleCount} of {userGroups.length} users)
+          Load More ({visibleGroupCount} of {userGroups.length} users)
         </button>
       )}
 
@@ -918,11 +932,7 @@ function AssignedFilesView({ units, members, batchId, canManage }: { units: any[
               {pendingUnits.reduce((sum: number, u: any) => sum + (u.unit_count || 1), 0)} pages
             </span>
           </div>
-          <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
-            {pendingUnits.map((unit: any) => (
-              <UnitRow key={unit.chunk_id} unit={unit} members={members} batchId={batchId} canManage={canManage} />
-            ))}
-          </div>
+          <UnitGroupList units={pendingUnits} members={members} batchId={batchId} canManage={canManage} />
         </div>
       )}
     </div>

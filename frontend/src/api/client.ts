@@ -133,7 +133,7 @@ export async function fetchAllPages(url: string) {
   return items
 }
 
-function buildFileTree(files: any[]) {
+export function buildFileTree(files: any[]) {
   const roots: any[] = []
   const folders = new Map<string, any>()
 
@@ -336,6 +336,17 @@ export const jobsApi = {
   files: async (id: string) => {
     const data = await fetchAllPages(`/work/batch/${id}/files/`)
     return { data }
+  },
+  filesPaged: async (id: string, page = 1) => {
+    const response = await api.get(`/work/batch/${id}/files/?page=${page}`)
+    const payload = response.data
+    const results = Array.isArray(payload?.results) ? payload.results : Array.isArray(payload) ? payload : []
+    return {
+      data: results,
+      count: payload?.count ?? results.length,
+      next: payload?.next ?? null,
+      page,
+    }
   },
   fileTree: async (id: string) => {
     const response = await jobsApi.files(id)

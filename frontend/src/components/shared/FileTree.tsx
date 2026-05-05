@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { jobsApi } from '@/api/client'
+import { useInfiniteQuery } from '@tanstack/react-query'
+import { jobsApi, buildFileTree } from '@/api/client'
 import { FileTypeIcon, PageLoader } from '@/components/shared'
 import { ChevronRight, ChevronDown, Folder, FolderOpen } from 'lucide-react'
 import { clsx } from 'clsx'
@@ -33,9 +33,11 @@ function TreeNodeRow({
   depth?: number
   onFileClick?: (node: TreeNode) => void
 }) {
-  const [expanded, setExpanded] = useState(depth < 2) // auto-expand first 2 levels
+  const [expanded, setExpanded] = useState(depth < 2)
 
   if (node.type === 'folder') {
+    const children = node.children || []
+
     return (
       <div>
         <div
@@ -50,13 +52,13 @@ function TreeNodeRow({
             ? <FolderOpen className="w-4 h-4 text-amber-500 flex-shrink-0" />
             : <Folder className="w-4 h-4 text-amber-500 flex-shrink-0" />}
           <span className="text-sm font-medium text-gray-800">{node.name}</span>
-          {node.children && (
-            <span className="text-xs text-gray-400 ml-1">({node.children.length})</span>
+          {children.length > 0 && (
+            <span className="text-xs text-gray-400 ml-1">({children.length})</span>
           )}
         </div>
-        {expanded && node.children && (
+        {expanded && children.length > 0 && (
           <div>
-            {node.children.map((child) => (
+            {children.map((child) => (
               <TreeNodeRow
                 key={child.full_path}
                 node={child}
@@ -70,7 +72,6 @@ function TreeNodeRow({
     )
   }
 
-  // File node
   return (
     <div
       className={clsx(
@@ -104,14 +105,25 @@ export function FileTreeViewer({
   jobId: string
   onFileClick?: (node: TreeNode) => void
 }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['job-file-tree', jobId],
-    queryFn: () => jobsApi.fileTree(jobId),
+  const {
+    data,
+    isLoading,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['job-files-paged', jobId],
+    queryFn: ({ pageParam }) => jobsApi.filesPaged(jobId, pageParam as number),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage: any) => lastPage.next ? lastPage.page + 1 : undefined,
   })
 
   if (isLoading) return <PageLoader />
 
-  const tree: TreeNode[] = data?.data || []
+  const allFiles = data?.pages.flatMap((p: any) => p.data) ?? []
+  const totalCount = data?.pages[0]?.count ?? 0
+  const loadedCount = allFiles.length
+  const tree: TreeNode[] = buildFileTree(allFiles)
 
   if (tree.length === 0) {
     return (
@@ -123,10 +135,21 @@ export function FileTreeViewer({
   }
 
   return (
-    <div className="font-mono text-sm">
+    <div className="font-mono text-sm space-y-0.5">
       {tree.map((node) => (
         <TreeNodeRow key={node.full_path} node={node} depth={0} onFileClick={onFileClick} />
       ))}
+      {hasNextPage && (
+        <button
+          className="mt-2 w-full text-sm text-blue-600 hover:text-blue-800 font-medium py-2 rounded-lg hover:bg-blue-50 transition-colors disabled:opacity-50"
+          onClick={() => fetchNextPage()}
+          disabled={isFetchingNextPage}
+        >
+          {isFetchingNextPage
+            ? 'Loading...'
+            : `Load More (${loadedCount} of ${totalCount} files)`}
+        </button>
+      )}
     </div>
   )
 }
