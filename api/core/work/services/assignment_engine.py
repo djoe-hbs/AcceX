@@ -269,9 +269,11 @@ def auto_refill_for_production_user(batch: WorkBatch, production_user, assigned_
 
 def submit_to_validation(unit: WorkUnit):
     close_active_assignments(unit, WorkUnitAssignment.Stage.PRODUCTION)
+    close_active_assignments(unit, WorkUnitAssignment.Stage.VALIDATION)
     unit.status = WorkUnit.Status.IN_VALIDATION
+    unit.current_validation_assignee = None
     unit.production_submitted_at = timezone.now()
-    unit.save(update_fields=["status", "production_submitted_at", "updated"])
+    unit.save(update_fields=["status", "current_validation_assignee", "production_submitted_at", "updated"])
 
     notify_production_submitted(unit)
 

@@ -27,7 +27,7 @@ function ManagementDashboard() {
 
   const { data: jobsData, isLoading: jobsLoading } = useQuery({
     queryKey: ['dashboard-jobs'],
-    queryFn: () => jobsApi.list(),
+    queryFn: () => jobsApi.listPaged(1),
     refetchInterval: 15000,
   })
 
@@ -85,7 +85,22 @@ function ManagementDashboard() {
 function ProductionDashboard() {
   const { data, isLoading } = useQuery({
     queryKey: ['production-dashboard-tasks'],
-    queryFn: () => chunksApi.myTasks(),
+    queryFn: () => chunksApi.myTasksPaged(1),
+    refetchInterval: 15000,
+  })
+  const { data: assignedCounts } = useQuery({
+    queryKey: ['production-dashboard-tasks-assigned'],
+    queryFn: () => chunksApi.myTasksByStatusPaged('ASSIGNED_TO_PRODUCTION', 1),
+    refetchInterval: 15000,
+  })
+  const { data: redoCounts } = useQuery({
+    queryKey: ['production-dashboard-tasks-redo'],
+    queryFn: () => chunksApi.myTasksByStatusPaged('REDO', 1),
+    refetchInterval: 15000,
+  })
+  const { data: inValidationCounts } = useQuery({
+    queryKey: ['production-dashboard-tasks-in-validation'],
+    queryFn: () => chunksApi.myTasksByStatusPaged('IN_VALIDATION', 1),
     refetchInterval: 15000,
   })
 
@@ -94,6 +109,10 @@ function ProductionDashboard() {
   }
 
   const tasks = data?.data || []
+  const totalCount = data?.count ?? tasks.length
+  const assignedCount = assignedCounts?.count ?? tasks.filter((t: any) => t.status === 'assigned').length
+  const redoCount = redoCounts?.count ?? tasks.filter((t: any) => t.status === 'redo').length
+  const inValidationCount = inValidationCounts?.count ?? tasks.filter((t: any) => t.status === 'in_validation').length
 
   return (
     <div className="space-y-6">
@@ -103,10 +122,10 @@ function ProductionDashboard() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Assigned" value={tasks.filter((t: any) => t.status === 'assigned').length} color="blue" />
-        <StatCard label="Redo" value={tasks.filter((t: any) => t.status === 'redo').length} color="orange" />
-        <StatCard label="Completed" value={tasks.filter((t: any) => t.status === 'completed').length} color="green" />
-        <StatCard label="Total" value={tasks.length} color="gray" />
+        <StatCard label="Assigned" value={assignedCount} color="blue" />
+        <StatCard label="Redo" value={redoCount} color="orange" />
+        <StatCard label="In Validation" value={inValidationCount} color="yellow" />
+        <StatCard label="Total" value={totalCount} color="gray" />
       </div>
 
       <div className="card">
@@ -138,7 +157,7 @@ function ProductionDashboard() {
 function ValidationDashboard() {
   const { data, isLoading } = useQuery({
     queryKey: ['validation-dashboard-tasks'],
-    queryFn: () => chunksApi.myValidationTasks(),
+    queryFn: () => chunksApi.myValidationTasksPaged(1),
     refetchInterval: 15000,
   })
 
@@ -147,6 +166,7 @@ function ValidationDashboard() {
   }
 
   const tasks = data?.data || []
+  const pendingCount = data?.count ?? tasks.length
 
   return (
     <div className="space-y-6">
@@ -155,7 +175,7 @@ function ValidationDashboard() {
         <p className="text-sm text-gray-500 mt-0.5">Units waiting for review</p>
       </div>
 
-      <StatCard label="Pending Review" value={tasks.length} color="yellow" />
+      <StatCard label="Pending Review" value={pendingCount} color="yellow" />
 
       <div className="card">
         <div className="flex items-center justify-between mb-4">

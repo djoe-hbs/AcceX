@@ -3,6 +3,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
+from django.db import transaction
 from django.http import FileResponse
 from django.utils import timezone
 
@@ -19,7 +20,7 @@ from core.permissions import (
     is_validation_user,
     can_manage_work_batches,
 )
-from core.work.models import WorkUnit
+from core.work.models import WorkUnit, WorkBatchMember, WorkUnitAssignment
 from core.work.serializers import (
     WorkUnitSerializer,
     AutoAssignSerializer,
@@ -62,7 +63,12 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
         elif is_production_user(user):
             filtered = queryset.filter(current_production_assignee=user).exclude(status=WorkUnit.Status.COMPLETED)
         elif is_validation_user(user):
-            filtered = queryset.filter(current_validation_assignee=user, status=WorkUnit.Status.IN_VALIDATION)
+            member_batch_ids = WorkBatchMember.objects.filter(
+                user=user,
+                role=WorkBatchMember.Role.VALIDATION,
+                is_active=True,
+            ).values_list("batch_id", flat=True)
+            filtered = queryset.filter(batch_id__in=member_batch_ids, status=WorkUnit.Status.IN_VALIDATION)
         else:
             raise PermissionDenied("You do not have permission to access work units.")
 
@@ -97,6 +103,14 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
         if unit.current_validation_assignee_id == user.id:
             return True
         return False
+
+    def _is_validation_member_for_batch(self, user, batch_id):
+        return WorkBatchMember.objects.filter(
+            batch_id=batch_id,
+            user=user,
+            role=WorkBatchMember.Role.VALIDATION,
+            is_active=True,
+        ).exists()
 
     def _resolve_source_file_path(self, unit):
         if not unit.batch.extraction_root:
@@ -232,6 +246,43 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
 
         handle = open(report_path, "rb")
         return FileResponse(handle, as_attachment=True, filename=report_path.name)
+
+    @action(detail=True, methods=["post"], url_path="accept-validation")
+    def accept_validation(self, request, pk=None):
+        if not is_validation_user(request.user):
+            raise PermissionDenied("Only validation users can accept validation work.")
+
+        with transaction.atomic():
+            try:
+                unit = WorkUnit.objects.select_for_update().select_related("batch").get(public_id=pk)
+            except (ObjectDoesNotExist, ValueError, TypeError):
+                raise NotFound("Work unit does not exist.")
+
+            if unit.status != WorkUnit.Status.IN_VALIDATION:
+                raise PermissionDenied("This unit is not available for validation acceptance.")
+
+            if not self._is_validation_member_for_batch(request.user, unit.batch_id):
+                raise PermissionDenied("You are not an active validation member of this job batch.")
+
+            if unit.current_validation_assignee_id and unit.current_validation_assignee_id != request.user.id:
+                raise PermissionDenied("This unit has already been accepted by another validation user.")
+
+            if unit.current_validation_assignee_id == request.user.id:
+                return Response({"detail": "Unit already accepted by you."}, status=status.HTTP_200_OK)
+
+            unit.current_validation_assignee = request.user
+            unit.save(update_fields=["current_validation_assignee", "updated"])
+
+            WorkUnitAssignment.objects.create(
+                unit=unit,
+                stage=WorkUnitAssignment.Stage.VALIDATION,
+                assignee=request.user,
+                assigned_by=request.user,
+                is_active=True,
+                reason="Validator accepted work from shared queue.",
+            )
+
+        return Response({"detail": "Validation work accepted successfully."}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="validate")
     def validate_unit(self, request, pk=None):

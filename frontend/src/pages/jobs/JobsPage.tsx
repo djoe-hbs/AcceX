@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { jobsApi, usersApi, chunksApi, clientsApi } from '@/api/client'
 import {
   Alert,
@@ -228,6 +228,7 @@ export function JobDetailPage() {
   const [downloading, setDownloading] = useState(false)
   const [showSignOff, setShowSignOff] = useState(false)
   const [showDeactivate, setShowDeactivate] = useState(false)
+  const [showFileTree, setShowFileTree] = useState(false)
 
   const signOffMutation = useMutation({
     mutationFn: () => jobsApi.signOff(id || '', true),
@@ -262,13 +263,6 @@ export function JobDetailPage() {
     refetchInterval: 15000,
   })
 
-  const { data: filesData, isLoading: filesLoading } = useQuery({
-    queryKey: ['job-files', id],
-    queryFn: () => jobsApi.files(id || ''),
-    enabled: Boolean(id),
-    refetchInterval: 15000,
-  })
-
   const { data: membersData, isLoading: membersLoading } = useQuery({
     queryKey: ['job-members', id],
     queryFn: () => jobsApi.members(id || ''),
@@ -276,14 +270,31 @@ export function JobDetailPage() {
     refetchInterval: 15000,
   })
 
-  const { data: unitsData, isLoading: unitsLoading } = useQuery({
+  const {
+    data: unitsData,
+    isLoading: unitsLoading,
+    hasNextPage: hasMoreUnits,
+    isFetchingNextPage: loadingMoreUnits,
+    fetchNextPage: fetchMoreUnits,
+  } = useInfiniteQuery({
     queryKey: ['job-units', id],
-    queryFn: () => chunksApi.byBatch(id || ''),
+    queryFn: ({ pageParam }) => chunksApi.byBatchPaged(id || '', pageParam),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => {
+      if (!lastPage?.next) return undefined
+      try {
+        const parsed = new URL(lastPage.next, window.location.origin)
+        const nextPage = parsed.searchParams.get('page')
+        return nextPage ? Number(nextPage) : undefined
+      } catch {
+        return undefined
+      }
+    },
     enabled: Boolean(id),
     refetchInterval: 15000,
   })
 
-  if (jobLoading || filesLoading || membersLoading || unitsLoading) {
+  if (jobLoading || membersLoading || unitsLoading) {
     return <PageLoader />
   }
 
@@ -292,9 +303,8 @@ export function JobDetailPage() {
   }
 
   const job = jobData?.data
-  const files = filesData?.data || []
   const members = membersData?.data || []
-  const units = unitsData?.data || []
+  const units = unitsData?.pages?.flatMap((page: any) => page.data || []) || []
 
   const showAutoAssign = units.length === 0 || units.some((u: any) => u.status === 'pending')
 
@@ -372,9 +382,15 @@ export function JobDetailPage() {
         <div className="card">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-gray-900">Files</h2>
-            <Badge variant="blue">{files.length}</Badge>
+            <Badge variant="blue">{job?.total_files || 0}</Badge>
           </div>
-          <FileTreeViewer jobId={id || ''} />
+          {!showFileTree ? (
+            <button className="btn-secondary" onClick={() => setShowFileTree(true)}>
+              Load File Tree
+            </button>
+          ) : (
+            <FileTreeViewer jobId={id || ''} />
+          )}
         </div>
 
         <div className="space-y-6">
@@ -406,6 +422,13 @@ export function JobDetailPage() {
               batchId={id || ''}
               canManage={Boolean(isRole('sme') && id)}
             />
+            {hasMoreUnits && (
+              <div className="mt-3">
+                <button className="btn-secondary w-full" onClick={() => fetchMoreUnits()} disabled={loadingMoreUnits}>
+                  {loadingMoreUnits ? 'Loading...' : 'Load More Units'}
+                </button>
+              </div>
+            )}
             {isRole('sme') && id && showAutoAssign && <AutoAssignPanel batchId={id} units={units} />}
           </div>
         </div>

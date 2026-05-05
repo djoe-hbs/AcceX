@@ -1,5 +1,5 @@
-from django.db.models import Count, Q
-from django.http import Http404
+from django.db.models import Count, Q, Sum
+from urllib.parse import urlencode
 
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -9,12 +9,13 @@ from rest_framework.response import Response
 
 from core.permissions import (
     is_admin,
+    is_sme,
     is_production_user,
     is_superadmin,
     is_validation_user,
 )
 from core.user.models import User
-from core.work.models import WorkUnit
+from core.work.models import WorkBatch, WorkUnit
 
 
 def _can_see_everyone(user):
@@ -68,14 +69,69 @@ def _serialize_unit(unit):
 class AnalyticsViewSet(viewsets.ViewSet):
     permission_classes = (IsAuthenticated,)
 
+    def _build_page_url(self, request, page: int):
+        params = request.query_params.copy()
+        params["page"] = str(page)
+        return f"{request.path}?{urlencode(params, doseq=True)}"
+
+    @action(detail=False, methods=["get"], url_path="summary")
+    def summary(self, request):
+        if not (_can_see_everyone(request.user) or is_sme(request.user)):
+            raise PermissionDenied("Only superadmin/admin/SME can view dashboard summary.")
+
+        jobs = WorkBatch.objects.all()
+        if not _can_see_everyone(request.user):
+            jobs = jobs.exclude(status=WorkBatch.Status.INACTIVE)
+
+        total_jobs = jobs.count()
+        ready_jobs = jobs.filter(status=WorkBatch.Status.READY).count()
+        processing_jobs = jobs.filter(status=WorkBatch.Status.PROCESSING).count()
+        failed_jobs = jobs.filter(status=WorkBatch.Status.FAILED).count()
+        total_files = jobs.aggregate(total=Sum("total_files"))["total"] or 0
+
+        return Response(
+            {
+                "total_jobs": total_jobs,
+                "ready_jobs": ready_jobs,
+                "processing_jobs": processing_jobs,
+                "failed_jobs": failed_jobs,
+                "total_files": total_files,
+                "total_users": User.objects.count(),
+                "total_clients": 0,
+            }
+        )
+
     @action(detail=False, methods=["get"], url_path="me")
     def me(self, request):
         user = request.user
         units = _completed_units_for_user(user)
+        try:
+            page = max(int(request.query_params.get("page", 1)), 1)
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            page_size = max(int(request.query_params.get("page_size", 20)), 1)
+        except (TypeError, ValueError):
+            page_size = 20
+        start = (page - 1) * page_size
+        end = start + page_size
+        total_count = units.count()
+        page_units = units[start:end]
+
+        next_url = None
+        previous_url = None
+        if end < total_count:
+            next_url = self._build_page_url(request, page + 1)
+        if page > 1:
+            previous_url = self._build_page_url(request, page - 1)
+
         return Response(
             {
-                "completed_count": units.count(),
-                "completed_units": [_serialize_unit(unit) for unit in units],
+                "completed_count": total_count,
+                "count": total_count,
+                "next": next_url,
+                "previous": previous_url,
+                "completed_units": [_serialize_unit(unit) for unit in page_units],
             }
         )
 

@@ -1,19 +1,32 @@
 import { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { chunksApi } from '@/api/client'
+import { useAuth } from '@/store/auth'
 import { Alert, ChunkStatusBadge, EmptyState, Modal, PageLoader } from '@/components/shared'
 import { CheckCircle, Download, Upload, XCircle } from 'lucide-react'
 
 export default function ValidatePage() {
+  const { user } = useAuth()
   const queryClient = useQueryClient()
   const [selectedRejectTask, setSelectedRejectTask] = useState<any>(null)
   const [rejectReason, setRejectReason] = useState('')
   const [reportFile, setReportFile] = useState<File | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetchingNextPage, fetchNextPage, hasNextPage } = useInfiniteQuery({
     queryKey: ['validation-tasks'],
-    queryFn: () => chunksApi.myValidationTasks(),
+    queryFn: ({ pageParam }) => chunksApi.myValidationTasksPaged(pageParam),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => {
+      if (!lastPage?.next) return undefined
+      try {
+        const parsed = new URL(lastPage.next, window.location.origin)
+        const nextPage = parsed.searchParams.get('page')
+        return nextPage ? Number(nextPage) : undefined
+      } catch {
+        return undefined
+      }
+    },
     refetchInterval: 15000,
   })
 
@@ -35,11 +48,23 @@ export default function ValidatePage() {
     },
   })
 
+  const acceptMutation = useMutation({
+    mutationFn: (taskId: string) => chunksApi.acceptValidation(taskId),
+    onSuccess: () => {
+      setMessage({ type: 'success', text: 'Unit accepted for validation.' })
+      queryClient.invalidateQueries({ queryKey: ['validation-tasks'] })
+    },
+    onError: (err: any) => {
+      setMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to accept unit.' })
+      queryClient.invalidateQueries({ queryKey: ['validation-tasks'] })
+    },
+  })
+
   if (isLoading) {
     return <PageLoader />
   }
 
-  const tasks = data?.data || []
+  const tasks = data?.pages?.flatMap((page: any) => page.data || []) || []
 
   return (
     <div className="space-y-6">
@@ -53,12 +78,23 @@ export default function ValidatePage() {
       <div className="space-y-3">
         {tasks.map((task: any) => (
           <div key={task.chunk_id} className="card">
+            {(() => {
+              const assignedToMe = Boolean(user?.id && task.validation_user_id === user.id)
+              const assignedToOther = Boolean(task.validation_user_id && task.validation_user_id !== user?.id)
+              const canValidate = assignedToMe
+              return (
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-sm font-medium text-gray-900">{task.file_name}</p>
                 <p className="text-xs text-gray-500 mt-1">{task.file_path}</p>
                 <p className="text-xs text-gray-500 mt-1">
+                  Production user: {task.production_user_name || 'Unassigned'}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
                   {task.unit_start || task.unit_end ? `Range ${task.unit_start || '?'} - ${task.unit_end || '?'}` : 'Whole file'}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {assignedToMe ? 'Accepted by you' : assignedToOther ? `Accepted by ${task.validation_user_name || 'another validator'}` : 'Waiting for acceptance'}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -77,25 +113,52 @@ export default function ValidatePage() {
                     Output
                   </button>
                 )}
+                {!canValidate && (
+                  <button
+                    className="btn-primary py-1.5 text-xs"
+                    onClick={() => acceptMutation.mutate(task.chunk_id)}
+                    disabled={acceptMutation.isPending || assignedToOther}
+                  >
+                    Accept
+                  </button>
+                )}
                 <button
                   className="btn-success py-1.5 text-xs"
                   onClick={() => validateMutation.mutate({ taskId: task.chunk_id, result: 'approved' })}
-                  disabled={validateMutation.isPending}
+                  disabled={validateMutation.isPending || !canValidate}
                 >
                   <CheckCircle className="w-3.5 h-3.5" />
                   Approve
                 </button>
-                <button className="btn-danger py-1.5 text-xs" onClick={() => setSelectedRejectTask(task)} disabled={validateMutation.isPending}>
+                <button
+                  className="btn-danger py-1.5 text-xs"
+                  onClick={() => setSelectedRejectTask(task)}
+                  disabled={validateMutation.isPending || !canValidate}
+                >
                   <XCircle className="w-3.5 h-3.5" />
                   Reject
                 </button>
               </div>
             </div>
+              )
+            })()}
           </div>
         ))}
 
         {tasks.length === 0 && <EmptyState title="Queue is clear" description="No units are waiting for validation." />}
       </div>
+
+      {hasNextPage && (
+        <div className="flex justify-center">
+          <button
+            className="btn-secondary"
+            onClick={() => fetchNextPage()}
+            disabled={isFetchingNextPage}
+          >
+            {isFetchingNextPage ? 'Loading...' : 'Load more'}
+          </button>
+        </div>
+      )}
 
       <Modal open={Boolean(selectedRejectTask)} onClose={() => { setSelectedRejectTask(null); setReportFile(null) }} title="Reject Unit" size="sm">
         <div className="space-y-4">

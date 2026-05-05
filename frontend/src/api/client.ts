@@ -322,6 +322,17 @@ export const jobsApi = {
     const data = await fetchAllPages('/work/batch/')
     return { data: data.map(mapBatch) }
   },
+  listPaged: async (page = 1) => {
+    const response = await api.get(`/work/batch/?page=${page}`)
+    const payload = response.data
+    const results = (Array.isArray(payload?.results) ? payload.results : Array.isArray(payload) ? payload : []).map(mapBatch)
+    return {
+      data: results,
+      count: payload?.count ?? results.length,
+      next: payload?.next ?? null,
+      page,
+    }
+  },
   get: async (id: string) => {
     const response = await api.get(`/work/batch/${id}/`)
     return { ...response, data: mapBatch(response.data) }
@@ -379,10 +390,43 @@ export const chunksApi = {
     const data = await fetchAllPages('/work/unit/')
     return { data: data.map(mapUnit) }
   },
+  myTasksPaged: async (page = 1) => {
+    const response = await api.get(`/work/unit/?page=${page}`)
+    const payload = response.data
+    const results = (Array.isArray(payload?.results) ? payload.results : Array.isArray(payload) ? payload : []).map(mapUnit)
+    return {
+      data: results,
+      count: payload?.count ?? results.length,
+      next: payload?.next ?? null,
+      page,
+    }
+  },
+  myTasksByStatusPaged: async (status: string, page = 1) => {
+    const response = await api.get(`/work/unit/?status=${encodeURIComponent(status)}&page=${page}`)
+    const payload = response.data
+    const results = (Array.isArray(payload?.results) ? payload.results : Array.isArray(payload) ? payload : []).map(mapUnit)
+    return {
+      data: results,
+      count: payload?.count ?? results.length,
+      next: payload?.next ?? null,
+      page,
+    }
+  },
   myValidationTasks: async () => {
     const data = await fetchAllPages('/work/unit/')
     return {
       data: data.map(mapUnit).filter((unit: any) => unit.status === 'in_validation'),
+    }
+  },
+  myValidationTasksPaged: async (page = 1) => {
+    const response = await api.get(`/work/unit/?status=IN_VALIDATION&page=${page}`)
+    const payload = response.data
+    const results = (Array.isArray(payload?.results) ? payload.results : Array.isArray(payload) ? payload : []).map(mapUnit)
+    return {
+      data: results,
+      count: payload?.count ?? results.length,
+      next: payload?.next ?? null,
+      page,
     }
   },
   byBatch: async (batchId: string) => {
@@ -419,6 +463,7 @@ export const chunksApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+  acceptValidation: (id: string) => api.post(`/work/unit/${id}/accept-validation/`),
   downloadRedoReport: (id: string) => downloadUnitFile(`/work/unit/${id}/download-redo-report/`),
   reassignProduction: (id: string, data: { new_production_user_id: string; reason?: string }) =>
     api.post(`/work/unit/${id}/reassign-production/`, data),
@@ -460,23 +505,15 @@ async function downloadUnitFile(path: string) {
 
 export const analyticsApi = {
   dashboard: async () => {
-    const [jobsResponse, usersResponse] = await Promise.all([jobsApi.list(), usersApi.list()])
-    const jobs = jobsResponse.data
-    const users = usersResponse.data
-    return {
-      data: {
-        total_jobs: jobs.length,
-        ready_jobs: jobs.filter((job: any) => job.status === 'ready').length,
-        processing_jobs: jobs.filter((job: any) => job.status === 'processing').length,
-        failed_jobs: jobs.filter((job: any) => job.status === 'failed').length,
-        total_files: jobs.reduce((sum: number, job: any) => sum + (job.total_files || 0), 0),
-        total_users: users.length,
-        total_clients: 0,
-      },
-    }
+    const response = await api.get('/analytics/summary/')
+    return { data: response.data }
   },
   myReport: async () => {
     const response = await api.get('/analytics/me/')
+    return { data: response.data }
+  },
+  myReportPaged: async (page = 1, pageSize = 20) => {
+    const response = await api.get(`/analytics/me/?page=${page}&page_size=${pageSize}`)
     return { data: response.data }
   },
   usersReport: async () => {

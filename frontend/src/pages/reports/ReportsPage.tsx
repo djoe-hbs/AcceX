@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { analyticsApi } from '@/api/client'
 import { useAuth } from '@/store/auth'
 import { EmptyState, PageLoader, StatCard, Table } from '@/components/shared'
@@ -25,21 +25,34 @@ export default function ReportsPage() {
 }
 
 function MyReport() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = useInfiniteQuery({
     queryKey: ['reports-me'],
-    queryFn: () => analyticsApi.myReport(),
+    queryFn: ({ pageParam }) => analyticsApi.myReportPaged(pageParam, 20),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => {
+      const nextUrl = lastPage?.data?.next
+      if (!nextUrl) return undefined
+      try {
+        const parsed = new URL(nextUrl, window.location.origin)
+        const nextPage = parsed.searchParams.get('page')
+        return nextPage ? Number(nextPage) : undefined
+      } catch {
+        return undefined
+      }
+    },
     refetchInterval: 15000,
   })
 
   if (isLoading) return <PageLoader />
 
-  const report = data?.data
-  const units = report?.completed_units || []
+  const firstPage = data?.pages?.[0]?.data
+  const completedCount = firstPage?.completed_count ?? 0
+  const units = data?.pages?.flatMap((page: any) => page?.data?.completed_units || []) || []
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Completed Files" value={report?.completed_count ?? 0} color="green" />
+        <StatCard label="Completed Files" value={completedCount} color="green" />
       </div>
 
       <div className="card p-0 overflow-hidden">
@@ -67,6 +80,14 @@ function MyReport() {
           )}
         </Table>
       </div>
+
+      {hasNextPage && (
+        <div className="flex justify-center">
+          <button className="btn-secondary" onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+            {isFetchingNextPage ? 'Loading...' : 'Load more'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

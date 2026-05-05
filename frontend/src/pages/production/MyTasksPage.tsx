@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { chunksApi } from '@/api/client'
 import { Alert, Badge, ChunkStatusBadge, EmptyState, Modal, PageLoader } from '@/components/shared'
 import { AlertTriangle, Download, Upload } from 'lucide-react'
@@ -11,9 +11,20 @@ export default function MyTasksPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = useInfiniteQuery({
     queryKey: ['my-tasks'],
-    queryFn: () => chunksApi.myTasks(),
+    queryFn: ({ pageParam }) => chunksApi.myTasksPaged(pageParam),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => {
+      if (!lastPage?.next) return undefined
+      try {
+        const parsed = new URL(lastPage.next, window.location.origin)
+        const nextPage = parsed.searchParams.get('page')
+        return nextPage ? Number(nextPage) : undefined
+      } catch {
+        return undefined
+      }
+    },
     refetchInterval: 15000,
   })
 
@@ -38,7 +49,7 @@ export default function MyTasksPage() {
     return <PageLoader />
   }
 
-  const tasks = data?.data || []
+  const tasks = data?.pages?.flatMap((page: any) => page.data || []) || []
   const reworkTasks = tasks.filter((t: any) => t.status === 'redo')
   const regularTasks = tasks.filter((t: any) => t.status !== 'redo')
 
@@ -173,6 +184,14 @@ export default function MyTasksPage() {
       )}
 
       {tasks.length === 0 && <EmptyState title="No assigned tasks" description="When units are assigned to you, they will appear here." />}
+
+      {hasNextPage && (
+        <div className="flex justify-center">
+          <button className="btn-secondary" onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+            {isFetchingNextPage ? 'Loading...' : 'Load more'}
+          </button>
+        </div>
+      )}
 
       <Modal open={Boolean(selectedTask)} onClose={() => setSelectedTask(null)} title={selectedTask?.status === 'redo' ? 'Upload Rework File' : 'Upload Completed File'} size="sm">
         <div className="space-y-4">
