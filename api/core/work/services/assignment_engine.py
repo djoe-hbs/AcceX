@@ -75,7 +75,9 @@ def initialize_work_units(batch: WorkBatch):
             )
         )
 
-    WorkUnit.objects.bulk_create(units_to_create)
+    # Ignore conflicts so duplicate creation attempts from concurrent requests
+    # do not raise and break auto-assign in production.
+    WorkUnit.objects.bulk_create(units_to_create, ignore_conflicts=True)
 
 
 def close_active_assignments(unit: WorkUnit, stage: str):
@@ -168,27 +170,28 @@ def auto_assign_units(
            workloads happen to be tied (secondary sort).
     4. Cycle through validation users independently.
     """
-    initialize_work_units(batch)
-
-    # Largest files first — LPT heuristic gives the most balanced page spread
-    pending_units = list(
-        WorkUnit.objects.filter(batch=batch, status=WorkUnit.Status.PENDING)
-        .select_related("work_file")
-        .order_by("-workload_count", "work_file__relative_path", "unit_number")
-    )
-
-    if not pending_units:
-        return 0
-
-    # Cross-job workloads so existing assignments are accounted for
-    workloads = _get_cross_job_workloads(production_users)
-    file_counts = {u.pk: 0 for u in production_users}
-    user_by_pk = {u.pk: u for u in production_users}
-
-    validation_cycle = cycle(validation_users)
-    total_assigned = 0
-
     with transaction.atomic():
+        # Serialize initialization for the same batch to avoid races across
+        # concurrent auto-assign requests.
+        WorkBatch.objects.select_for_update().filter(pk=batch.pk).exists()
+        initialize_work_units(batch)
+
+        # Largest files first — LPT heuristic gives the most balanced page spread
+        pending_units = list(
+            WorkUnit.objects.filter(batch=batch, status=WorkUnit.Status.PENDING)
+            .select_related("work_file")
+            .order_by("-workload_count", "work_file__relative_path", "unit_number")
+        )
+        if not pending_units:
+            return 0
+
+        # Cross-job workloads so existing assignments are accounted for
+        workloads = _get_cross_job_workloads(production_users)
+        file_counts = {u.pk: 0 for u in production_users}
+        user_by_pk = {u.pk: u for u in production_users}
+        validation_cycle = cycle(validation_users)
+        total_assigned = 0
+
         for unit in pending_units:
             # Primary key: total pages (balance workload)
             # Secondary key: file count (prevent one user getting many more files)
