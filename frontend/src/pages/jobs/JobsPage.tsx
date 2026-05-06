@@ -409,7 +409,7 @@ export function JobDetailPage() {
     isFetchingNextPage: loadingMoreUnits,
     fetchNextPage: fetchMoreUnits,
   } = useInfiniteQuery({
-    queryKey: ['job-units', id],
+    queryKey: ['job-units-paged', id],
     queryFn: ({ pageParam }) => chunksApi.byBatchPaged(id || '', pageParam),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => {
@@ -426,8 +426,7 @@ export function JobDetailPage() {
     refetchInterval: 15000,
   })
 
-  if (jobLoading || membersLoading || unitsLoading) {
-  if (jobLoading || membersLoading || unitsLoading) {
+  if (jobLoading) {
     return <PageLoader />
   }
 
@@ -532,15 +531,21 @@ export function JobDetailPage() {
               <h2 className="font-semibold text-gray-900">Batch Members</h2>
             </div>
             <div className="space-y-3">
-              {members.map((member: any) => (
-                <MemberRow
-                  key={member.id}
-                  member={member}
-                  batchId={id || ''}
-                  canManage={Boolean(isRole('sme') && id)}
-                />
-              ))}
-              {members.length === 0 && <EmptyState title="No members yet" description="SME can add production and validation users to this batch." />}
+              {membersLoading ? (
+                <PageLoader />
+              ) : (
+                <>
+                  {members.map((member: any) => (
+                    <MemberRow
+                      key={member.id}
+                      member={member}
+                      batchId={id || ''}
+                      canManage={Boolean(isRole('sme') && id)}
+                    />
+                  ))}
+                  {members.length === 0 && <EmptyState title="No members yet" description="SME can add production and validation users to this batch." />}
+                </>
+              )}
             </div>
           </div>
 
@@ -549,20 +554,26 @@ export function JobDetailPage() {
               <h2 className="font-semibold text-gray-900">Assigned Files</h2>
               <Badge variant="purple">{units.length}</Badge>
             </div>
-            <AssignedFilesView
-              units={units}
-              members={members}
-              batchId={id || ''}
-              canManage={Boolean(isRole('sme') && id)}
-            />
-            {hasMoreUnits && (
-              <div className="mt-3">
-                <button className="btn-secondary w-full" onClick={() => fetchMoreUnits()} disabled={loadingMoreUnits}>
-                  {loadingMoreUnits ? 'Loading...' : 'Load More Units'}
-                </button>
-              </div>
+            {unitsLoading ? (
+              <PageLoader />
+            ) : (
+              <>
+                <AssignedFilesView
+                  units={units}
+                  members={members}
+                  batchId={id || ''}
+                  canManage={Boolean(isRole('sme') && id)}
+                />
+                {hasMoreUnits && (
+                  <div className="mt-3">
+                    <button className="btn-secondary w-full" onClick={() => fetchMoreUnits()} disabled={loadingMoreUnits}>
+                      {loadingMoreUnits ? 'Loading...' : 'Load More Units'}
+                    </button>
+                  </div>
+                )}
+                {isRole('sme') && id && showAutoAssign && <AutoAssignPanel batchId={id} units={units} />}
+              </>
             )}
-            {isRole('sme') && id && showAutoAssign && <AutoAssignPanel batchId={id} units={units} />}
           </div>
         </div>
       </div>
@@ -735,6 +746,7 @@ function AutoAssignPanel({ batchId, units }: { batchId: string; units: any[] }) 
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
+      queryClient.invalidateQueries({ queryKey: ['job-units-paged', batchId] })
       queryClient.invalidateQueries({ queryKey: ['job-members', batchId] })
       setError('')
     },
@@ -815,6 +827,7 @@ function MemberRow({ member, batchId, canManage }: { member: any; batchId: strin
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['job-members', batchId] })
       queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
+      queryClient.invalidateQueries({ queryKey: ['job-units-paged', batchId] })
       queryClient.invalidateQueries({ queryKey: ['assignable-users', 'available'] })
       setShowConfirm(false)
     },
@@ -1053,6 +1066,7 @@ function ManualAssignModal({
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
+      queryClient.invalidateQueries({ queryKey: ['job-units-paged', batchId] })
       queryClient.invalidateQueries({ queryKey: ['assignable-users', 'available'] })
       onClose()
     },

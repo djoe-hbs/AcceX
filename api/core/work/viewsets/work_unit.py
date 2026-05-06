@@ -41,6 +41,7 @@ from core.work.services import (
     create_overdue_alerts,
     send_units_for_client_rework,
 )
+from django.conf import settings
 
 
 class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
@@ -103,7 +104,6 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
             return True
         return False
 
-<<<<<<< HEAD
     def _is_validation_member_for_batch(self, user, batch_id):
         return WorkBatchMember.objects.filter(
             batch_id=batch_id,
@@ -129,8 +129,6 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
 
         return candidate
 
-=======
->>>>>>> ff8d77a1a34f5b20289b51e0e22b96322802c687
     @action(detail=False, methods=["post"], url_path="auto-assign")
     def auto_assign(self, request):
         if not is_sme(request.user):
