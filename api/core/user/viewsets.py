@@ -1,5 +1,6 @@
 from django.db.models import Q
 from django.http import Http404
+from django.db.models import Prefetch
 
 from rest_framework import status
 from rest_framework import viewsets
@@ -66,6 +67,24 @@ class UserViewSet(viewsets.ModelViewSet):
             queryset = queryset.exclude(
                 Q(role=User.Role.PRODUCTION_USER, id__in=busy_production_ids)
                 | Q(role=User.Role.VALIDATION_USER, id__in=busy_validation_ids)
+            )
+
+        if self.action == "list":
+            queryset = queryset.prefetch_related(
+                Prefetch(
+                    "production_work_units",
+                    queryset=WorkUnit.objects.select_related("batch").filter(
+                        status__in=[WorkUnit.Status.ASSIGNED_TO_PRODUCTION, WorkUnit.Status.REDO],
+                    ),
+                    to_attr="active_production_units",
+                ),
+                Prefetch(
+                    "validation_work_units",
+                    queryset=WorkUnit.objects.select_related("batch").filter(
+                        status__in=[WorkUnit.Status.IN_VALIDATION],
+                    ),
+                    to_attr="active_validation_units",
+                )
             )
 
         return queryset

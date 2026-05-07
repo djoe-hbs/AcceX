@@ -496,6 +496,7 @@ export const chunksApi = {
     api.post(`/work/unit/${id}/reassign-production/`, data),
   manualAssign: (id: string, data: { production_user_id: string; validation_user_id: string; reason?: string }) =>
     api.post(`/work/unit/${id}/manual-assign/`, data),
+  unassign: (id: string) => api.post(`/work/unit/${id}/unassign/`),
   downloadSource: (id: string) => downloadUnitFile(`/work/unit/${id}/download-source/`),
   downloadProduction: (id: string) => downloadUnitFile(`/work/unit/${id}/download-production/`),
   bulkClientRework: (data: {

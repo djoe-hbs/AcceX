@@ -70,7 +70,7 @@ export function JobsListPage() {
                   <Link to={`/jobs/${job.id}`} className="text-blue-600 hover:text-blue-800 text-sm font-medium">
                     View
                   </Link>
-                  {job.status === 'completed' && isRole('superadmin', 'admin') && (
+                  {isRole('superadmin', 'admin') && (
                     <button
                       className="text-purple-600 hover:text-purple-800 text-sm font-medium flex items-center gap-1"
                       onClick={(e) => {
@@ -79,7 +79,7 @@ export function JobsListPage() {
                       }}
                     >
                       <Download className="w-3.5 h-3.5" />
-                      Download
+                      Download Files
                     </button>
                   )}
                   {job.status !== 'inactive' && isRole('superadmin', 'admin') && (
@@ -437,8 +437,7 @@ export function JobDetailPage() {
   const job = jobData?.data
   const members = membersData?.data || []
   const units = unitsData?.pages?.flatMap((page: any) => page.data || []) || []
-
-  const showAutoAssign = units.length === 0 || units.some((u: any) => u.status === 'pending')
+  const showAutoAssign = Boolean(isRole('sme') && id && !job?.initiated_by_sme && (units.length === 0 || units.some((u: any) => u.status === 'pending')))
 
   const handleDownloadCompleted = async () => {
     if (!id) return
@@ -473,14 +472,14 @@ export function JobDetailPage() {
             <MessageSquare className="w-4 h-4" />
             Client Feedback
           </Link>
-          {['completed', 'on_rework', 'fully_completed'].includes(job?.status) && isRole('superadmin', 'admin') && (
+          {isRole('superadmin', 'admin') && (
             <button
               className="btn-primary"
               onClick={handleDownloadCompleted}
               disabled={downloading}
             >
               <Download className="w-4 h-4" />
-              {downloading ? 'Downloading...' : 'Download Completed Files'}
+              {downloading ? 'Downloading...' : 'Download Files'}
             </button>
           )}
           {job?.status === 'on_rework' && isRole('sme') && (
@@ -535,6 +534,7 @@ export function JobDetailPage() {
                 <PageLoader />
               ) : (
                 <>
+                  {isRole('sme') && id && job?.initiated_by_sme && <BatchMemberManager batchId={id} members={members} />}
                   {members.map((member: any) => (
                     <MemberRow
                       key={member.id}
@@ -571,7 +571,7 @@ export function JobDetailPage() {
                     </button>
                   </div>
                 )}
-                {isRole('sme') && id && showAutoAssign && <AutoAssignPanel batchId={id} units={units} />}
+                {showAutoAssign && <AutoAssignPanel batchId={id || ''} units={units} />}
               </>
             )}
           </div>
@@ -626,6 +626,61 @@ export function JobDetailPage() {
   )
 }
 
+function BatchMemberManager({ batchId, members }: { batchId: string; members: any[] }) {
+  const queryClient = useQueryClient()
+  const [role, setRole] = useState<'PRODUCTION' | 'VALIDATION'>('PRODUCTION')
+  const [userId, setUserId] = useState('')
+  const [error, setError] = useState('')
+
+  const { data: usersData } = useQuery({
+    queryKey: ['all-users'],
+    queryFn: () => usersApi.list(),
+  })
+
+  const allUsers = usersData?.data || []
+  const roleUsers = allUsers.filter((u: any) => (role === 'PRODUCTION' ? u.role === 'production' : u.role === 'validation'))
+  const existingUserIds = new Set(
+    members.filter((m: any) => m.role === role).map((m: any) => m.user_id)
+  )
+  const selectableUsers = roleUsers.filter((u: any) => !existingUserIds.has(u.id))
+
+  const addMutation = useMutation({
+    mutationFn: () => jobsApi.addMember(batchId, { user_id: userId, role }),
+    onSuccess: () => {
+      setError('')
+      setUserId('')
+      queryClient.invalidateQueries({ queryKey: ['job-members', batchId] })
+      queryClient.invalidateQueries({ queryKey: ['all-users'] })
+    },
+    onError: (err: any) => setError(err.response?.data?.detail || 'Unable to add member.'),
+  })
+
+  return (
+    <div className="rounded-lg border border-dashed border-gray-300 p-3">
+      <p className="text-sm font-medium text-gray-900">Add Additional Member</p>
+      <p className="text-xs text-gray-500 mt-0.5">SME can add users even after auto-assignment, then assign/reassign files manually.</p>
+      {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+      <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+        <select className="input" value={role} onChange={(e) => setRole(e.target.value as 'PRODUCTION' | 'VALIDATION')}>
+          <option value="PRODUCTION">Production</option>
+          <option value="VALIDATION">Validation</option>
+        </select>
+        <select className="input md:col-span-2" value={userId} onChange={(e) => setUserId(e.target.value)}>
+          <option value="">Select user</option>
+          {selectableUsers.map((u: any) => (
+            <option key={u.id} value={u.id}>{u.name}</option>
+          ))}
+        </select>
+      </div>
+      <div className="mt-2">
+        <button className="btn-secondary py-1.5 px-3 text-xs" disabled={!userId || addMutation.isPending} onClick={() => addMutation.mutate()}>
+          {addMutation.isPending ? 'Adding...' : 'Add Member'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function ChunkStatusPill({ status }: { status: string }) {
   return <Badge variant={status === 'completed' ? 'green' : status === 'in_validation' ? 'yellow' : 'blue'}>{status.replace('_', ' ')}</Badge>
 }
@@ -637,7 +692,7 @@ function MultiSelectDropdown({
   placeholder,
   openUpward = false,
 }: {
-  options: { id: string; name: string }[]
+  options: { id: string; name: string; statusText?: string; metaText?: string }[]
   selected: string[]
   onChange: (ids: string[]) => void
   placeholder: string
@@ -672,10 +727,10 @@ function MultiSelectDropdown({
             <p className="text-sm text-gray-400 px-3 py-2">No users available</p>
           ) : (
             options.map((opt) => (
-              <label key={opt.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer select-none">
+              <label key={opt.id} className="flex items-start gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer select-none">
                 <input
                   type="checkbox"
-                  className="flex-shrink-0"
+                  className="flex-shrink-0 mt-0.5"
                   checked={selected.includes(opt.id)}
                   onChange={() =>
                     onChange(
@@ -685,7 +740,11 @@ function MultiSelectDropdown({
                     )
                   }
                 />
-                <span className="text-sm text-gray-700">{opt.name}</span>
+                <div className="min-w-0">
+                  <p className="text-sm text-gray-700 leading-5">{opt.name}</p>
+                  {opt.statusText && <p className="text-[11px] text-gray-500 uppercase tracking-wide">{opt.statusText}</p>}
+                  {opt.metaText && <p className="text-[11px] text-gray-500 truncate">{opt.metaText}</p>}
+                </div>
               </label>
             ))
           )}
@@ -716,11 +775,33 @@ function AutoAssignPanel({ batchId, units }: { batchId: string; units: any[] }) 
 
   const productionUsers = allUsers
     .filter((u: any) => u.role === 'production')
-    .map((u: any) => ({ id: u.id, name: u.name }))
+    .map((u: any) => {
+      const activeBatches = Array.isArray(u.active_batches) ? u.active_batches : []
+      const otherBatchNames = activeBatches
+        .filter((b: any) => b.batch_id !== batchId)
+        .map((b: any) => b.batch_name)
+      return {
+        id: u.id,
+        name: u.name,
+        statusText: u.work_status || (otherBatchNames.length > 0 ? 'working' : 'free'),
+        metaText: otherBatchNames.length > 0 ? `Other batches: ${otherBatchNames.join(', ')}` : 'No other active batches',
+      }
+    })
 
   const validationUsers = allUsers
     .filter((u: any) => u.role === 'validation')
-    .map((u: any) => ({ id: u.id, name: u.name }))
+    .map((u: any) => {
+      const activeBatches = Array.isArray(u.active_batches) ? u.active_batches : []
+      const otherBatchNames = activeBatches
+        .filter((b: any) => b.batch_id !== batchId)
+        .map((b: any) => b.batch_name)
+      return {
+        id: u.id,
+        name: u.name,
+        statusText: u.work_status || (otherBatchNames.length > 0 ? 'working' : 'free'),
+        metaText: otherBatchNames.length > 0 ? `Other batches: ${otherBatchNames.join(', ')}` : 'No other active batches',
+      }
+    })
 
   const totalPages = units.reduce((sum: number, u: any) => sum + (u.unit_count || 1), 0)
   const pendingPages = units
@@ -996,7 +1077,20 @@ function UnitRow({
   canManage: boolean
 }) {
   const [assignOpen, setAssignOpen] = useState(false)
+  const [reassignOpen, setReassignOpen] = useState(false)
+  const [error, setError] = useState('')
+  const queryClient = useQueryClient()
+  const isCompleted = unit.status === 'completed'
   const isPending = unit.status === 'pending'
+  const unassignMutation = useMutation({
+    mutationFn: () => chunksApi.unassign(unit.chunk_id),
+    onSuccess: () => {
+      setError('')
+      queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
+      queryClient.invalidateQueries({ queryKey: ['job-units-paged', batchId] })
+    },
+    onError: (err: any) => setError(err.response?.data?.detail || 'Unable to unassign unit.'),
+  })
 
   return (
     <div className="rounded-lg border border-gray-100 p-3">
@@ -1010,24 +1104,46 @@ function UnitRow({
         </div>
         <div className="flex items-center gap-2">
           <ChunkStatusPill status={unit.status} />
-          {canManage && isPending && (
-            <button
-              type="button"
-              className="btn-secondary py-1 px-2 text-xs"
-              title="Manually assign this unit"
-              onClick={() => setAssignOpen(true)}
-            >
-              <UserCheck className="w-3.5 h-3.5" />
-              Assign
-            </button>
+          {canManage && !isCompleted && (
+            <>
+              <button
+                type="button"
+                className="btn-secondary py-1 px-2 text-xs"
+                title={isPending ? 'Manually assign this unit' : 'Reassign this unit'}
+                onClick={() => (isPending ? setAssignOpen(true) : setReassignOpen(true))}
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                {isPending ? 'Assign' : 'Reassign'}
+              </button>
+              {!isPending && (
+                <button
+                  type="button"
+                  className="btn-secondary py-1 px-2 text-xs text-red-600 border-red-200 hover:bg-red-50"
+                  title="Unassign this unit back to pending"
+                  disabled={unassignMutation.isPending}
+                  onClick={() => unassignMutation.mutate()}
+                >
+                  {unassignMutation.isPending ? 'Unassigning...' : 'Unassign'}
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
+      {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
       {assignOpen && (
         <ManualAssignModal
           unit={unit}
           batchId={batchId}
           onClose={() => setAssignOpen(false)}
+        />
+      )}
+      {reassignOpen && (
+        <ReassignProductionModal
+          unit={unit}
+          batchId={batchId}
+          members={members}
+          onClose={() => setReassignOpen(false)}
         />
       )}
     </div>
@@ -1109,6 +1225,69 @@ function ManualAssignModal({
             disabled={!productionUserId || !validationUserId || assignMutation.isPending}
           >
             {assignMutation.isPending ? 'Assigning...' : 'Assign'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function ReassignProductionModal({
+  unit,
+  batchId,
+  members,
+  onClose,
+}: {
+  unit: any
+  batchId: string
+  members: any[]
+  onClose: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [productionUserId, setProductionUserId] = useState(unit.production_user_id || '')
+  const [error, setError] = useState('')
+
+  const productionMembers = members.filter((m: any) => m.role === 'PRODUCTION')
+
+  const reassignMutation = useMutation({
+    mutationFn: () =>
+      chunksApi.reassignProduction(unit.chunk_id, {
+        new_production_user_id: productionUserId,
+        reason: 'Manual reassignment by SME.',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['job-units', batchId] })
+      queryClient.invalidateQueries({ queryKey: ['job-units-paged', batchId] })
+      setError('')
+      onClose()
+    },
+    onError: (err: any) => setError(err.response?.data?.detail || 'Reassignment failed.'),
+  })
+
+  return (
+    <Modal open onClose={onClose} title={`Reassign "${unit.file_name}"`} size="sm">
+      <div className="space-y-4">
+        {error && <Alert type="error" message={error} />}
+        {productionMembers.length === 0 && (
+          <Alert type="error" message="No production members on this job. Add one first." />
+        )}
+        <div>
+          <label className="label">Production user</label>
+          <select className="input" value={productionUserId} onChange={(e) => setProductionUserId(e.target.value)}>
+            <option value="">Select production user</option>
+            {productionMembers.map((m: any) => (
+              <option key={m.user_id} value={m.user_id}>{m.user_name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button
+            className="btn-primary"
+            onClick={() => reassignMutation.mutate()}
+            disabled={!productionUserId || reassignMutation.isPending}
+          >
+            {reassignMutation.isPending ? 'Saving...' : 'Reassign'}
           </button>
         </div>
       </div>

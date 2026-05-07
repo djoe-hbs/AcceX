@@ -179,6 +179,21 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
 
         return Response({"detail": "Unit assigned successfully."}, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["post"], url_path="unassign")
+    def unassign(self, request, pk=None):
+        unit = self.get_object()
+
+        if not is_sme(request.user):
+            raise PermissionDenied("Only SME can unassign units.")
+
+        if unit.status == WorkUnit.Status.COMPLETED:
+            raise PermissionDenied("Completed unit cannot be unassigned.")
+
+        from core.work.services import unassign_unit
+
+        unassign_unit(unit, reason="Manually unassigned by SME.")
+        return Response({"detail": "Unit moved back to pending."}, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=["get"], url_path="download-source")
     def download_source(self, request, pk=None):
         unit = self.get_object()
@@ -186,12 +201,26 @@ class WorkUnitViewSet(viewsets.ReadOnlyModelViewSet):
         if not self._can_manage_unit(request.user, unit):
             raise PermissionDenied("You do not have permission to download this file.")
 
-        if not unit.work_file.source_file:
-            raise NotFound("Source file not found.")
+        # Preferred: original extracted source file.
+        if unit.work_file.source_file:
+            filename = Path(unit.work_file.source_file.name).name
+            handle = unit.work_file.source_file.open("rb")
+            return FileResponse(handle, as_attachment=True, filename=filename)
 
-        filename = Path(unit.work_file.source_file.name).name
-        handle = unit.work_file.source_file.open("rb")
-        return FileResponse(handle, as_attachment=True, filename=filename)
+        # Rework fallback: if source is unavailable, provide the latest
+        # production output so production can continue from prior work.
+        if unit.production_output:
+            filename = Path(unit.production_output.name).name
+            handle = unit.production_output.open("rb")
+            return FileResponse(handle, as_attachment=True, filename=filename)
+
+        # Local-storage fallback (older/local extraction flow).
+        try:
+            file_path = self._resolve_source_file_path(unit)
+            handle = file_path.open("rb")
+            return FileResponse(handle, as_attachment=True, filename=file_path.name)
+        except NotFound:
+            raise NotFound("Source file not found.")
 
     @action(detail=True, methods=["post"], url_path="submit-production")
     def submit_production(self, request, pk=None):
