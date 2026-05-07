@@ -85,6 +85,57 @@ def notify_work_assigned(unit, production_user, validation_user):
     )
 
 
+def notify_bulk_work_assigned(assignments):
+    """
+    assignments: list of (unit, production_user, validation_user)
+    """
+    if not _is_enabled() or not assignments:
+        return
+
+    prod_map = {}  # user -> list of units
+    val_map = {}   # user -> list of units
+
+    for unit, prod, val in assignments:
+        if prod:
+            prod_map.setdefault(prod, []).append(unit)
+        if val:
+            val_map.setdefault(val, []).append(unit)
+
+    for user, units in prod_map.items():
+        batch_name = units[0].batch.name if units and units[0].batch else "Multiple Jobs"
+        unit_list_str = "\n".join([f"- {_unit_label(u)}" for u in units[:20]])
+        if len(units) > 20:
+            unit_list_str += f"\n- ... and {len(units) - 20} more units."
+
+        _send(
+            subject=f"[AcceX] {len(units)} new work units assigned to you",
+            body=(
+                f"Hi {user.name},\n\n"
+                f"You have been assigned {len(units)} new work units in job: {batch_name}.\n\n"
+                f"Units:\n{unit_list_str}\n\n"
+                f"Please log in to AcceX to start working on them.\n"
+            ),
+            recipient_list=[user.email],
+        )
+
+    for user, units in val_map.items():
+        batch_name = units[0].batch.name if units and units[0].batch else "Multiple Jobs"
+        unit_list_str = "\n".join([f"- {_unit_label(u)}" for u in units[:20]])
+        if len(units) > 20:
+            unit_list_str += f"\n- ... and {len(units) - 20} more units."
+
+        _send(
+            subject=f"[AcceX] {len(units)} new units queued for your validation",
+            body=(
+                f"Hi {user.name},\n\n"
+                f"{len(units)} new work units have been assigned and will come to you for validation once production is done.\n\n"
+                f"Job: {batch_name}\n"
+                f"Units:\n{unit_list_str}\n\n"
+            ),
+            recipient_list=[user.email],
+        )
+
+
 def notify_production_submitted(unit):
     validator = unit.current_validation_assignee
     if not validator:
@@ -172,27 +223,47 @@ def notify_client_rework_requested(batch, review):
 
 
 def notify_units_for_client_rework(unit_assignments, batch):
-    for unit, production_user, validation_user in unit_assignments:
-        label = _unit_label(unit)
+    if not _is_enabled() or not unit_assignments:
+        return
+
+    prod_map = {}  # user -> list of units
+    val_map = {}   # user -> list of units
+
+    for unit, prod, val in unit_assignments:
+        if prod:
+            prod_map.setdefault(prod, []).append(unit)
+        if val:
+            val_map.setdefault(val, []).append(unit)
+
+    for user, units in prod_map.items():
+        unit_list_str = "\n".join([f"- {_unit_label(u)}" for u in units[:20]])
+        if len(units) > 20:
+            unit_list_str += f"\n- ... and {len(units) - 20} more units."
+
         _send(
-            subject=f"[AcceX] Client rework assigned to you: {label}",
+            subject=f"[AcceX] {len(units)} client rework units assigned to you",
             body=(
-                f"Hi {production_user.name},\n\n"
-                f"A work unit from the job \"{batch.name}\" needs rework based on client feedback.\n\n"
-                f"File: {unit.work_file.relative_path if unit.work_file else 'N/A'}\n"
-                f"Reason: {unit.redo_reason or 'Client requested rework.'}\n\n"
+                f"Hi {user.name},\n\n"
+                f"{len(units)} work units from the job \"{batch.name}\" need rework based on client feedback.\n\n"
+                f"Units:\n{unit_list_str}\n\n"
                 f"Please log in to AcceX to address the changes.\n"
             ),
-            recipient_list=[production_user.email],
+            recipient_list=[user.email],
         )
+
+    for user, units in val_map.items():
+        unit_list_str = "\n".join([f"- {_unit_label(u)}" for u in units[:20]])
+        if len(units) > 20:
+            unit_list_str += f"\n- ... and {len(units) - 20} more units."
+
         _send(
-            subject=f"[AcceX] Client rework unit queued for validation: {label}",
+            subject=f"[AcceX] {len(units)} client rework units queued for validation",
             body=(
-                f"Hi {validation_user.name},\n\n"
-                f"A reworked unit from the job \"{batch.name}\" will come to you for re-validation.\n\n"
-                f"File: {unit.work_file.relative_path if unit.work_file else 'N/A'}\n"
+                f"Hi {user.name},\n\n"
+                f"{len(units)} reworked units from the job \"{batch.name}\" will come to you for re-validation.\n\n"
+                f"Units:\n{unit_list_str}\n\n"
             ),
-            recipient_list=[validation_user.email],
+            recipient_list=[user.email],
         )
 
 

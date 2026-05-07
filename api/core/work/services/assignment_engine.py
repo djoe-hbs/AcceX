@@ -15,6 +15,7 @@ from core.work.models import (
 )
 from core.work.services.notification_engine import (
     notify_work_assigned,
+    notify_bulk_work_assigned,
     notify_production_submitted,
     notify_validation_approved,
     notify_sent_for_redo,
@@ -85,7 +86,7 @@ def close_active_assignments(unit: WorkUnit, stage: str):
     WorkUnitAssignment.objects.filter(unit=unit, stage=stage, is_active=True).update(is_active=False, ended_at=now)
 
 
-def assign_unit(unit: WorkUnit, production_user, validation_user, assigned_by, reason=None):
+def assign_unit(unit: WorkUnit, production_user, validation_user, assigned_by, reason=None, notify=True):
     close_active_assignments(unit, WorkUnitAssignment.Stage.PRODUCTION)
     close_active_assignments(unit, WorkUnitAssignment.Stage.VALIDATION)
 
@@ -128,7 +129,8 @@ def assign_unit(unit: WorkUnit, production_user, validation_user, assigned_by, r
         reason=reason,
     )
 
-    notify_work_assigned(unit, production_user, validation_user)
+    if notify:
+        notify_work_assigned(unit, production_user, validation_user)
 
 
 def unassign_unit(unit: WorkUnit, reason=None):
@@ -159,17 +161,8 @@ def auto_assign_units(
 ):
     """
     LPT (Longest Processing Time first) assignment with file-count tie-breaking.
-
-    1. Create one unit per file if units don't exist yet.
-    2. Sort pending units by workload_count DESC so the largest files are
-       distributed first — this is the key to near-equal page distribution.
-    3. For each unit assign to the production user whose (total_pages, file_count)
-       tuple is lowest, which:
-         • Minimises the maximum workload gap between users (primary sort).
-         • Prevents one user from accumulating many more files than others when
-           workloads happen to be tied (secondary sort).
-    4. Cycle through validation users independently.
     """
+    assignments_to_notify = []
     with transaction.atomic():
         # Serialize initialization for the same batch to avoid races across
         # concurrent auto-assign requests.
@@ -193,18 +186,20 @@ def auto_assign_units(
         total_assigned = 0
 
         for unit in pending_units:
-            # Primary key: total pages (balance workload)
-            # Secondary key: file count (prevent one user getting many more files)
-            # Tertiary key: pk (stable, deterministic tie-break)
             best_pk = min(
                 workloads,
                 key=lambda pk: (workloads[pk], file_counts[pk], pk),
             )
             prod = user_by_pk[best_pk]
-            assign_unit(unit, prod, next(validation_cycle), assigned_by)
+            validator = next(validation_cycle)
+            assign_unit(unit, prod, validator, assigned_by, notify=False)
+            assignments_to_notify.append((unit, prod, validator))
             workloads[best_pk] += unit.workload_count
             file_counts[best_pk] += 1
             total_assigned += 1
+
+    if assignments_to_notify:
+        notify_bulk_work_assigned(assignments_to_notify)
 
     return total_assigned
 
@@ -251,6 +246,7 @@ def auto_refill_for_production_user(batch: WorkBatch, production_user, assigned_
     validation_cycle = cycle([member.user for member in active_validation_members])
     assigned_count = 0
     filled_workload = 0
+    assignments_to_notify = []
 
     with transaction.atomic():
         for unit in pending_units:
@@ -263,9 +259,14 @@ def auto_refill_for_production_user(batch: WorkBatch, production_user, assigned_
                 validation_user=validator,
                 assigned_by=assigned_by or unit.assigned_by,
                 reason="Auto refill after production completion.",
+                notify=False,
             )
+            assignments_to_notify.append((unit, production_user, validator))
             assigned_count += 1
             filled_workload += unit.workload_count
+
+    if assignments_to_notify:
+        notify_bulk_work_assigned(assignments_to_notify)
 
     return assigned_count
 

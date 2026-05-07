@@ -23,7 +23,7 @@ def env_list(name, default=""):
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-insecure-change-me")
 
-DEBUG = env_bool("DJANGO_DEBUG", False)
+DEBUG = env_bool("DJANGO_DEBUG", True)
 
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost")
 
@@ -165,6 +165,7 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
 EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", False)
+EMAIL_TIMEOUT = 10  # seconds
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "noreply@accex.local")
 
 # Local directory for zip extraction and file counting (always on disk, never S3)
@@ -173,3 +174,12 @@ WORK_EXTRACTION_ROOT = BASE_DIR / "work_temp"
 WORK_INVOICE_DAY_OF_MONTH = int(os.getenv("WORK_INVOICE_DAY_OF_MONTH", "25"))
 WORK_INVOICE_EMAIL_ENABLED = env_bool("WORK_INVOICE_EMAIL_ENABLED", True)
 WORK_NOTIFICATION_EMAIL_ENABLED = env_bool("WORK_NOTIFICATION_EMAIL_ENABLED", True)
+
+# File Upload Settings
+# Set to a very large value (e.g., 100GB) to effectively remove limits without causing TypeErrors in Django
+MAX_UPLOAD_SIZE = 100 * 1024 * 1024 * 1024  # 100GB
+DATA_UPLOAD_MAX_MEMORY_SIZE = MAX_UPLOAD_SIZE
+FILE_UPLOAD_MAX_MEMORY_SIZE = MAX_UPLOAD_SIZE
+
+
+
