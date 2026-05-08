@@ -9,6 +9,7 @@ class UniqueFilePath:
         self.base_path = base_path
 
     def __call__(self, instance, filename):
-        ext = filename.split('.')[-1]
-        new_filename = f"{uuid.uuid4().hex}.{ext}"
+        parts = (filename or "").rsplit(".", 1)
+        ext = parts[1] if len(parts) > 1 else ""
+        new_filename = f"{uuid.uuid4().hex}.{ext}" if ext else uuid.uuid4().hex
         return f"media/{self.base_path}/{new_filename}"
