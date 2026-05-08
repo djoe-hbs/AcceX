@@ -129,7 +129,6 @@ function ProductionDashboard() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-gray-900">My Work</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Current production assignments from the backend</p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

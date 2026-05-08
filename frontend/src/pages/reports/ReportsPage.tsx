@@ -13,11 +13,6 @@ export default function ReportsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Reports</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          {adminView
-            ? 'Completed work across all production and validation users (all time).'
-            : 'Your successfully validated work (all time).'}
-        </p>
       </div>
 
       {adminView ? <AdminReports /> : <MyReport />}
