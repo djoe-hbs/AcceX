@@ -121,6 +121,33 @@ export function PageLoader() {
   )
 }
 
+export function Skeleton({ className = '' }: { className?: string }) {
+  return <div className={clsx('animate-pulse rounded-md bg-gray-200/80', className)} />
+}
+
+export function CardSkeleton() {
+  return (
+    <div className="card space-y-3">
+      <Skeleton className="h-3 w-28" />
+      <Skeleton className="h-8 w-20" />
+      <Skeleton className="h-3 w-36" />
+    </div>
+  )
+}
+
+export function ListSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <div className="space-y-3">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="rounded-lg border border-gray-100 p-3 space-y-2">
+          <Skeleton className="h-4 w-52" />
+          <Skeleton className="h-3 w-72 max-w-full" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ─── Empty State ─────────────────────────────────────────────────────────────
 
 export function EmptyState({ title, description, action }: {

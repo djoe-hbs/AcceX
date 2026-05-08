@@ -5,6 +5,7 @@ interface User {
   id: string
   email: string
   name: string
+  image?: string | null
   role: 'superadmin' | 'admin' | 'sme' | 'production' | 'validation'
   is_active: boolean
   created_at: string

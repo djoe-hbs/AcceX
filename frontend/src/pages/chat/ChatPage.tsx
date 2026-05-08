@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { chatApi } from '@/api/client'
 import { Send, Plus, ArrowLeft, MessageCircle, Search } from 'lucide-react'
 import { clsx } from 'clsx'
+import { ListSkeleton, Skeleton } from '@/components/shared'
 
 function formatTime(dateStr: string) {
   const d = new Date(dateStr)
@@ -109,7 +110,7 @@ export default function ChatPage() {
     <div className="h-[calc(100vh-8rem)] flex bg-white rounded-xl border border-gray-200 overflow-hidden">
       {/* Thread list sidebar */}
       <div className={clsx(
-        'w-full md:w-80 flex-shrink-0 border-r border-gray-200 flex flex-col',
+        'w-full md:w-80 flex-shrink-0 border-r border-gray-200 flex flex-col min-h-0',
         mobileShowMessages && 'hidden md:flex'
       )}>
         <div className="p-4 border-b border-gray-100">
@@ -204,7 +205,7 @@ export default function ChatPage() {
 
       {/* Message panel */}
       <div className={clsx(
-        'flex-1 flex flex-col',
+        'flex-1 flex flex-col min-h-0',
         !mobileShowMessages && 'hidden md:flex'
       )}>
         {showNewChat ? (
@@ -254,7 +255,7 @@ function NewChatPanel({
   )
 
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="flex-1 flex flex-col min-h-0">
       <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200">
         <button onClick={onBack} className="p-1 rounded hover:bg-gray-100">
           <ArrowLeft className="w-5 h-5 text-gray-600" />
@@ -271,8 +272,8 @@ function NewChatPanel({
           autoFocus
         />
       </div>
-      <div className="flex-1 overflow-y-auto">
-        {isLoading && <p className="p-4 text-sm text-gray-500">Loading...</p>}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        {isLoading && <div className="p-4"><ListSkeleton rows={5} /></div>}
         {!isLoading && filtered.length === 0 && (
           <p className="p-4 text-sm text-gray-500">No users found</p>
         )}
@@ -325,7 +326,7 @@ function MessagePanel({
 
   // Page-1 query: newest 20 messages. On each poll tick, also re-fetch any
   // additional pages already loaded so the user's expanded history stays fresh.
-  useQuery({
+  const { isLoading: isMessagesLoading } = useQuery({
     queryKey: ['chat-messages', thread.id, 'page-1'],
     queryFn: async () => {
       const pagesToLoad = msgLoadedPageRef.current
@@ -357,6 +358,14 @@ function MessagePanel({
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
   }, [messages])
+
+  useEffect(() => {
+    msgLoadedPageRef.current = 1
+    setMessages([])
+    setMsgsHasMore(false)
+    setMsgsTotalCount(0)
+    latestMsgIdRef.current = null
+  }, [thread.id])
 
   const loadOlderMessages = useCallback(async () => {
     if (msgsLoadingOlder) return
@@ -402,7 +411,7 @@ function MessagePanel({
   const other = thread.other_user
 
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="flex-1 flex flex-col min-h-0">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 bg-white">
         <button onClick={onBack} className="p-1 rounded hover:bg-gray-100 md:hidden">
@@ -427,7 +436,7 @@ function MessagePanel({
       {/* Messages */}
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50"
+        className="flex-1 overflow-y-auto min-h-0 p-4 space-y-3 bg-gray-50"
       >
         {/* Load older button at the top */}
         {msgsHasMore && (
@@ -442,10 +451,14 @@ function MessagePanel({
           </div>
         )}
 
-        {messages.length === 0 && (
-          <p className="text-center text-sm text-gray-400 mt-8">
-            No messages yet. Say hello!
-          </p>
+        {messages.length === 0 && isMessagesLoading && (
+          <div className="space-y-3 mt-6">
+            <Skeleton className="h-10 w-2/3" />
+            <Skeleton className="h-10 w-1/2 ml-auto" />
+          </div>
+        )}
+        {messages.length === 0 && !isMessagesLoading && (
+          <p className="text-center text-sm text-gray-400 mt-8">No messages yet. Say hello!</p>
         )}
 
         {messages.map((msg: any) => (

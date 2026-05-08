@@ -155,10 +155,14 @@ function TopBar() {
           )}
         </button>
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
-            <span className="text-white text-xs font-semibold">
-              {user?.name?.slice(0, 2).toUpperCase()}
-            </span>
+          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center overflow-hidden">
+            {user?.image ? (
+              <img src={user.image} alt={user.name || 'User'} className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-white text-xs font-semibold">
+                {user?.name?.slice(0, 2).toUpperCase()}
+              </span>
+            )}
           </div>
           <div className="hidden md:block">
             <p className="text-sm font-medium text-gray-900">{user?.name}</p>

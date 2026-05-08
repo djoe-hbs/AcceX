@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { analyticsApi } from '@/api/client'
 import { useAuth } from '@/store/auth'
-import { EmptyState, PageLoader, StatCard, Table } from '@/components/shared'
+import { CardSkeleton, EmptyState, ListSkeleton, PageLoader, StatCard, Table } from '@/components/shared'
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
 export default function ReportsPage() {
   const { isRole } = useAuth()
@@ -25,6 +26,7 @@ export default function ReportsPage() {
 }
 
 function MyReport() {
+  const [batchFilter, setBatchFilter] = useState('all')
   const { data, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = useInfiniteQuery({
     queryKey: ['reports-me'],
     queryFn: ({ pageParam }) => analyticsApi.myReportPaged(pageParam, 20),
@@ -43,21 +45,47 @@ function MyReport() {
     refetchInterval: 15000,
   })
 
-  if (isLoading) return <PageLoader />
+  if (isLoading) return <ReportSkeleton />
 
   const firstPage = data?.pages?.[0]?.data
   const completedCount = firstPage?.completed_count ?? 0
   const units = data?.pages?.flatMap((page: any) => page?.data?.completed_units || []) || []
+  const batchNames = Array.from(new Set(units.map((u: any) => u.batch_name).filter(Boolean)))
+  const filteredUnits = batchFilter === 'all' ? units : units.filter((u: any) => u.batch_name === batchFilter)
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="Completed Files" value={completedCount} color="green" />
       </div>
+      <div className="card space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-semibold text-gray-900">Completion Timeline</h2>
+          <select className="input max-w-[250px]" value={batchFilter} onChange={(e) => setBatchFilter(e.target.value)}>
+            <option value="all">All batches</option>
+            {batchNames.map((b) => <option key={b} value={b}>{b}</option>)}
+          </select>
+        </div>
+        <div className="h-56">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={Object.entries(filteredUnits.reduce((acc: Record<string, number>, u: any) => {
+              const day = u.completed_at ? new Date(u.completed_at).toLocaleDateString() : 'Unknown'
+              acc[day] = (acc[day] || 0) + 1
+              return acc
+            }, {})).map(([day, count]) => ({ day, count }))}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="day" />
+              <YAxis />
+              <Tooltip />
+              <Bar dataKey="count" fill="#16a34a" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
 
       <div className="card p-0 overflow-hidden">
         <Table headers={['File', 'Batch', 'Production', 'Validation', 'Completed At']}>
-          {units.map((unit: any) => (
+          {filteredUnits.map((unit: any) => (
             <tr key={unit.id} className="hover:bg-gray-50">
               <td className="table-td">
                 <p className="font-medium text-gray-900">{unit.file_name}</p>
@@ -71,7 +99,7 @@ function MyReport() {
               </td>
             </tr>
           ))}
-          {units.length === 0 && (
+          {filteredUnits.length === 0 && (
             <tr>
               <td colSpan={5}>
                 <EmptyState title="No completed work yet" description="Files appear here after they are approved by a validator." />
@@ -100,7 +128,7 @@ function AdminReports() {
   })
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
 
-  if (isLoading) return <PageLoader />
+  if (isLoading) return <ReportSkeleton />
 
   const production = data?.data?.production || []
   const validation = data?.data?.validation || []
@@ -132,6 +160,19 @@ function AdminReports() {
       {selectedUserId && (
         <UserDetail userId={selectedUserId} onClose={() => setSelectedUserId(null)} />
       )}
+    </div>
+  )
+}
+
+function ReportSkeleton() {
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {Array.from({ length: 4 }).map((_, i) => <CardSkeleton key={i} />)}
+      </div>
+      <div className="card">
+        <ListSkeleton rows={6} />
+      </div>
     </div>
   )
 }

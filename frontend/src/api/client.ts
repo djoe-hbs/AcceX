@@ -301,7 +301,9 @@ export const usersApi = {
     return { ...response, data: mapUser(response.data) }
   },
   update: async (id: string, data: object) => {
-    const response = await api.patch(`/user/${id}/`, data)
+    const response = await api.patch(`/user/${id}/`, data, data instanceof FormData ? {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    } : undefined)
     return { ...response, data: mapUser(response.data) }
   },
   delete: (id: string) => api.delete(`/user/${id}/`),

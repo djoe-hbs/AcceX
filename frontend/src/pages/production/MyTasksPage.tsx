@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { chunksApi } from '@/api/client'
-import { Alert, Badge, ChunkStatusBadge, EmptyState, Modal, PageLoader } from '@/components/shared'
+import { Alert, Badge, ChunkStatusBadge, EmptyState, ListSkeleton, Modal } from '@/components/shared'
 import { AlertTriangle, Download, Upload } from 'lucide-react'
 
 export default function MyTasksPage() {
@@ -10,6 +10,8 @@ export default function MyTasksPage() {
   const [selectedTask, setSelectedTask] = useState<any>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [statusFilter, setStatusFilter] = useState<'all' | 'assigned' | 'redo' | 'in_validation'>('all')
+  const [search, setSearch] = useState('')
 
   const { data, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = useInfiniteQuery({
     queryKey: ['my-tasks'],
@@ -46,12 +48,22 @@ export default function MyTasksPage() {
   })
 
   if (isLoading) {
-    return <PageLoader />
+    return (
+      <div className="space-y-4">
+        <ListSkeleton rows={6} />
+      </div>
+    )
   }
 
   const tasks = data?.pages?.flatMap((page: any) => page.data || []) || []
-  const reworkTasks = tasks.filter((t: any) => t.status === 'redo')
-  const regularTasks = tasks.filter((t: any) => t.status !== 'redo')
+  const filteredTasks = tasks.filter((t: any) => {
+    const statusMatch = statusFilter === 'all' ? true : t.status === statusFilter
+    const q = search.trim().toLowerCase()
+    const textMatch = !q || `${t.file_name} ${t.file_path} ${t.batch_name || ''}`.toLowerCase().includes(q)
+    return statusMatch && textMatch
+  })
+  const reworkTasks = filteredTasks.filter((t: any) => t.status === 'redo')
+  const regularTasks = filteredTasks.filter((t: any) => t.status !== 'redo')
 
   return (
     <div className="space-y-6">
@@ -61,6 +73,21 @@ export default function MyTasksPage() {
       </div>
 
       {message && <Alert type={message.type} message={message.text} />}
+      <div className="card grid grid-cols-1 md:grid-cols-3 gap-3">
+        <input
+          className="input"
+          placeholder="Search by file, path, job..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)}>
+          <option value="all">All statuses</option>
+          <option value="assigned">Assigned</option>
+          <option value="redo">Redo</option>
+          <option value="in_validation">In Validation</option>
+        </select>
+        <div className="text-sm text-gray-500 flex items-center">{filteredTasks.length} task(s)</div>
+      </div>
 
       {/* Rework section - always on top with prominent styling */}
       {reworkTasks.length > 0 && (
@@ -183,7 +210,7 @@ export default function MyTasksPage() {
         </div>
       )}
 
-      {tasks.length === 0 && <EmptyState title="No assigned tasks" description="When units are assigned to you, they will appear here." />}
+      {filteredTasks.length === 0 && <EmptyState title="No tasks found" description="Try changing search/filter or wait for new assignments." />}
 
       {hasNextPage && (
         <div className="flex justify-center">

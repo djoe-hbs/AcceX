@@ -99,6 +99,8 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def _check_manage_permission(self, target_user):
         actor = self.request.user
+        if actor.id == target_user.id:
+            return  # users can update their own profile fields
         if is_superadmin(actor):
             return  # superadmin can manage anyone
         if is_admin(actor):
