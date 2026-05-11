@@ -42,7 +42,7 @@ function ManagementDashboard() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Dashboard</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Current backend-connected workspace overview</p>
+        <p className="text-sm text-gray-500 mt-0.5">Current workspace overview</p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

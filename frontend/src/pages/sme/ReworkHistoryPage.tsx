@@ -34,7 +34,7 @@ export default function ReworkHistoryPage() {
 
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Unit Details</h1>
-        <p className="text-sm text-gray-500 mt-0.5">The backend does not expose historical versions yet, so this page shows the current state of the unit.</p>
+        <p className="text-sm text-gray-500 mt-0.5">This page shows the current state of the unit.</p>
       </div>
 
       <div className="card space-y-4">

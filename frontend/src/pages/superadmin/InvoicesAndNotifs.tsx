@@ -87,7 +87,7 @@ export function InvoicesPage() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Invoices</h1>
-          <p className="mt-0.5 text-sm text-gray-500">Generate, review, and email client invoices from the backend billing engine.</p>
+          <p className="mt-0.5 text-sm text-gray-500">Generate, review, and email client invoices.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button className="btn-secondary" onClick={() => setShowMonthlyGenerate(true)}>
@@ -435,7 +435,7 @@ function InvoiceDetailsModal({
   onError: (message: string) => void
 }) {
   const queryClient = useQueryClient()
-  const [recipients, setRecipients] = useState('vibecoder.hbs@gmail.com')
+  const [recipients, setRecipients] = useState('')
 
   const { data, isLoading } = useQuery({
     queryKey: ['invoice', invoiceId],
@@ -494,7 +494,6 @@ function InvoiceDetailsModal({
             <div className="flex items-center justify-between gap-4">
               <div>
                 <h3 className="font-medium text-gray-900">Email Invoice</h3>
-                <p className="mt-1 text-sm text-gray-500">Leave recipients empty to let the backend use its default invoice recipients.</p>
               </div>
               <button className="btn-primary" onClick={() => sendMutation.mutate()} disabled={sendMutation.isPending}>
                 <Mail className="h-4 w-4" />
@@ -541,10 +540,10 @@ export function NotificationsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Notifications</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Notification polling is still disabled because the backend does not expose notification resources yet.</p>
+        <p className="text-sm text-gray-500 mt-0.5">Notification features are currently unavailable.</p>
       </div>
       <div className="card">
-        <EmptyState title="No notification feed" description="When notification endpoints are added on the backend, this page can be connected again." />
+        <EmptyState title="No notification feed" description="When notification features are added, this page will be updated." />
       </div>
     </div>
   )

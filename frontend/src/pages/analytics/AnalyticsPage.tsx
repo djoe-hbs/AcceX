@@ -33,7 +33,7 @@ export default function AnalyticsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-gray-900">Analytics</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Live summary computed from currently exposed backend endpoints</p>
+        <p className="text-sm text-gray-500 mt-0.5">Live summary of workspace analytics</p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

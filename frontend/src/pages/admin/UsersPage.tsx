@@ -38,7 +38,7 @@ export default function UsersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Users</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Accounts currently available through the backend</p>
+          <p className="text-sm text-gray-500 mt-0.5">Manage system accounts</p>
         </div>
         <button className="btn-primary" onClick={() => setShowCreate(true)}>
           <Plus className="w-4 h-4" />

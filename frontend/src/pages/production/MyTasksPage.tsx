@@ -227,7 +227,7 @@ export default function MyTasksPage() {
               <p className="text-sm text-red-800">{selectedTask.redo_reason}</p>
             </div>
           )}
-          <p className="text-sm text-gray-600">Upload the completed file for this unit. The backend will move it into validation.</p>
+          <p className="text-sm text-gray-600">Upload the completed file for this unit. It will then move into validation.</p>
           <input ref={fileRef} type="file" className="hidden" onChange={(e) => setSelectedFile(e.target.files?.[0] || null)} />
           <button className="btn-secondary w-full justify-center" onClick={() => fileRef.current?.click()}>
             <Upload className="w-4 h-4" />
